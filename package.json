@@ -22,6 +22,7 @@
 		"src",
 		"web",
 		"dist",
+		"bin",
 		"scripts",
 		"README.md",
 		"LICENSE",
@@ -35,7 +36,7 @@
 	},
 	"scripts": {
 		"build": "node scripts/build.mjs",
-		"prepare": "node scripts/build.mjs",
+		"prepare": "node scripts/prepare.mjs",
 		"typecheck": "tsc --noEmit",
 		"check": "npm run typecheck && node --check dist/web/app.js",
 		"test": "node tests/smoke.mjs",
