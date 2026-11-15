@@ -376,7 +376,7 @@ Launchers that use the older variable names are supported too: `PI_PARENT_SESSIO
 
 Primary flow — the `pi` process that owns the dashboard:
 
-```
+```text
 pi session ──events──▶ bridge.ts ──POST /api/events──▶ server.ts ──▶ storage.ts
                                                             │
 browser ──WS /ws──▶ snapshot + event stream ◀───────────────┘
@@ -385,7 +385,7 @@ browser ──POST /api/sessions/:id/prompt──▶ local prompt handler ──
 
 Secondary flow — additional `pi` processes:
 
-```
+```text
 pi #2 ──WS /ws?role=instance&instanceId=…──▶ primary server
       ◀── {type:"command"} ── prompt for a session owned by this instance
       ──▶ {type:"command_ack"} ── accepted/rejected
@@ -393,7 +393,7 @@ pi #2 ──WS /ws?role=instance&instanceId=…──▶ primary server
 
 Standalone flow — `pi-webapp serve`, no agent process required:
 
-```
+```text
 pi-webapp serve ──serve dashboard + leech session files──▶ browser
        │
        ├── leech ~/.pi/agent/sessions ──▶ read-only sessions
@@ -438,7 +438,7 @@ Dashboard assets are served from `dist/web/` at `/`, `/app.js` and `/app.css`.
 
 ### Artifact cache layout
 
-```
+```text
 ~/.pi/cache/pi-webapp/
 └── <sessionId>/
     ├── m9x2k1-7f3a-login-form.png
@@ -549,7 +549,7 @@ This publishes the dashboard to your tailnet over HTTPS with Tailscale identity 
 
 ## Development
 
-```
+```text
 pi-webapp/
 ├── src/                  extension + server + daemon (TypeScript, ESM)
 ├── web/                  Preact dashboard (Tailwind v4 + daisyUI)
