@@ -144,6 +144,9 @@ try {
 	await writeFile(fakePi, "#!/bin/sh\necho fake-pi-started\nexec sleep 30\n");
 	await chmod(fakePi, 0o755);
 
+	const leechDir = path.join(tmpRoot, "leech");
+	await mkdir(leechDir, { recursive: true });
+
 	const port = await findFreePort();
 	const baseUrl = `http://127.0.0.1:${port}`;
 
@@ -155,7 +158,8 @@ try {
 			PI_WEBAPP_PI_BIN: fakePi,
 			PI_WEBAPP_HOST: "127.0.0.1",
 			PI_WEBAPP_SPAWN: "1",
-			PI_WEBAPP_LEECH: "0",
+			PI_WEBAPP_LEECH: "1",
+			PI_WEBAPP_LEECH_DIR: leechDir,
 			PI_WEBAPP_CACHE_DIR: path.join(tmpRoot, "cache"),
 		},
 		stdio: ["ignore", "pipe", "pipe"],
@@ -270,6 +274,45 @@ try {
 		stoppedRecord.status === "exited" || stoppedRecord.status === "failed",
 		`stopped spawn must report exited or failed, got ${stoppedRecord.status}`,
 	);
+
+	console.log("▶ prompt an idle leeched session (implicit resume)");
+	// A transcript nobody is running must be usable straight away: the first
+	// prompt resumes it in a background pi process instead of requiring takeover.
+	const leechedId = "aaaaaaaa-1111-4111-8111-aaaaaaaa1111";
+	const leechFile = path.join(leechDir, `2026-01-01T00-00-00-000Z_${leechedId}.jsonl`);
+	const leechStamp = new Date().toISOString();
+	await writeFile(
+		leechFile,
+		`${[
+			JSON.stringify({ type: "session", version: 3, id: leechedId, timestamp: leechStamp, cwd: sessionCwd }),
+			JSON.stringify({
+				type: "message",
+				id: "leech-m1",
+				parentId: null,
+				timestamp: leechStamp,
+				message: { role: "user", content: [{ type: "text", text: "earlier question" }] },
+			}),
+		].join("\n")}\n`,
+	);
+	const scanResponse = await fetch(`${baseUrl}/api/leech/scan`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ dirs: [leechDir] }),
+	});
+	assert.equal(scanResponse.status, 200, "POST /api/leech/scan");
+	await waitFor("leeched session to appear", async () => {
+		const state = await (await fetch(`${baseUrl}/api/state`)).json();
+		return state.sessions.some((session) => session.id === leechedId);
+	});
+	const resumeResponse = await fetch(`${baseUrl}/api/sessions/${leechedId}/prompt`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ text: "pick up where we left off" }),
+	});
+	assert.equal(resumeResponse.status, 202, "prompting an idle leeched session must resume it");
+	const resumeBody = await resumeResponse.json();
+	assert.equal(resumeBody.delivered, "spawned", "resume must report delivered: spawned");
+	assert.equal(resumeBody.spawn?.targetSessionId, leechedId, "resume spawn must target the leeched session");
 
 	console.log("▶ SIGTERM the daemon");
 	daemon.kill("SIGTERM");

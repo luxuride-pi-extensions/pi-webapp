@@ -229,7 +229,7 @@ export interface PromptCommand {
 
 export interface PromptResponse {
 	ok: boolean;
-	delivered?: "local" | "instance";
+	delivered?: "local" | "instance" | "spawned";
 	error?: string;
 }
 

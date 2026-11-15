@@ -196,7 +196,7 @@ Requirements:
 
 ### Taking over and removing sessions
 
-Leeched sessions are read-only until you take them over.
+A leeched transcript that no `pi` process is running is not locked: prompting it from the prompt bar resumes it automatically in a background `pi --session <file>` process and delivers the message. Takeover is only needed when another `pi` process still holds the transcript.
 
 - **Take over** (`↻` in the sidebar, or the header button) resumes the session in a new `pi --mode rpc --session <file>` process, so the history stays and the session id is unchanged. Ownership is detected by scanning `/proc/<pid>/environ` for `PI_SESSION_ID` together with a `pi` argv0 — a session is refused while its owner is mid-turn (`409 owner-busy`). When the owner is alive but idle, the dashboard asks before stopping that `pi` process and taking its place; the owning pid is shown in the sidebar as `pid N`.
 - **Subagents are never taken over** (`409 subagent`) and neither are live sessions (`409 live`).
@@ -459,7 +459,7 @@ Client → server: `hello` (`role: "ui" | "instance"`, optional `instanceId`), `
 | `GET` | `/api/state` | Full dashboard state: sessions, recent events, counts, leech status, spawn state. |
 | `GET` | `/api/health` | Liveness probe, `{ "ok": true }`. |
 | `POST` | `/api/events` | Ingest an event: `{ instanceId, event }`. Used by instances and the extension. |
-| `POST` | `/api/sessions/:sessionId/prompt` | Send a prompt to a session. `200 { ok, delivered: "local" }`, `202` when routed to another instance, `409` for leech-only sessions, `404` for unknown ids. |
+| `POST` | `/api/sessions/:sessionId/prompt` | Send a prompt to a session. `200 { ok, delivered: "local" }`, `202` when routed to another instance or when an idle leeched transcript was resumed (`delivered: "spawned"`), `409` when a `pi` process owns the session or spawning is unavailable, `404` for unknown ids. |
 | `POST` | `/api/sessions/:sessionId/takeover` | Resume a leeched session in a new `pi` process: `202 { ok, spawn, killedPid? }`; `409 live`, `409 subagent`, `409 owner-busy`, `409 owner-running` (`{ code, canKill: true, pid }` — resend with `{ kill: true }`), `409 takeover-pending`, `403` when spawning is disabled. |
 | `POST` | `/api/sessions/:sessionId/model` | Switch the session's model: `{ provider, modelId }`. `200 { ok, delivered: "local" \| "instance" }`, `400` for a missing field, `409` for leech-only sessions or a rejected switch, `404` for unknown ids. |
 | `DELETE` | `/api/sessions/:sessionId` | Remove a session and its subagents from the dashboard. Body `{ deleteFile?: boolean }` also unlinks the transcript. `200 { ok, removed, deletedFile? }`, `404` for unknown ids. |

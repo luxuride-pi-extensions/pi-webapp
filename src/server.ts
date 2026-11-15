@@ -2101,6 +2101,10 @@ export class WebappServer {
 
 		const session = this.sessions.get(sessionId);
 		if (session?.source === "leech") {
+			// A transcript nobody is running can simply be resumed: prompting it
+			// starts a fresh pi process, no takeover ceremony required.
+			const resumed = await this.promptLeachedSession(res, session, text);
+			if (resumed) return;
 			sendJson(res, 409, {
 				ok: false,
 				error: "session is leech-only: no pi instance is attached",
@@ -2114,6 +2118,63 @@ export class WebappServer {
 			return;
 		}
 		sendJson(res, 404, { ok: false, error: "session not found" });
+	}
+
+	/** Resumes an idle leeched session so a dashboard prompt can reach it. */
+	private async promptLeachedSession(
+		res: ServerResponse,
+		node: SessionNode,
+		text: string,
+	): Promise<boolean> {
+		const spawner = this.spawner;
+		if (!spawner || !spawner.enabled) return false;
+		if (node.isSubagent) {
+			sendJson(res, 409, {
+				ok: false,
+				code: "subagent",
+				error: "subagent sessions cannot be resumed from the dashboard",
+			});
+			return true;
+		}
+		const owner = this.ownerInfo(node);
+		if (owner.pids.length > 0) {
+			const pid = owner.pids[0] as number;
+			sendJson(res, 409, {
+				ok: false,
+				code: owner.busy ? "owner-busy" : "owner-running",
+				pid,
+				canKill: !owner.busy,
+				error: owner.busy
+					? `session is busy in pi pid ${pid}; wait for the current turn to finish`
+					: `session is open in pi pid ${pid}; take it over to prompt from here`,
+			});
+			return true;
+		}
+		if (!node.sessionFile) {
+			sendJson(res, 400, {
+				ok: false,
+				error: "session file is unknown, so this session cannot be resumed",
+			});
+			return true;
+		}
+		let record: SpawnRecord;
+		try {
+			record = await spawner.spawn({
+				cwd: node.cwd ?? spawner.defaultWorkingDir ?? process.cwd(),
+				sessionFile: node.sessionFile,
+				targetSessionId: node.id,
+				prompt: text,
+			});
+		} catch (error) {
+			const status = isRecord(error) && typeof error.status === "number" ? error.status : 500;
+			throw new HttpError(status, errorMessage(error));
+		}
+		this.initialPrompts.set(record.spawnId, text);
+		node.takeoverSpawnId = record.spawnId;
+		this.notifySpawnChange({ ...record });
+		this.broadcast({ type: "session", session: { ...node } });
+		sendJson(res, 202, { ok: true, delivered: "spawned", spawn: record });
+		return true;
 	}
 
 	private async handleLeechScanPost(req: IncomingMessage, res: ServerResponse): Promise<void> {

@@ -309,7 +309,10 @@ export function SessionTree({
 		? !!menuSession.takeoverSpawnId || takeoverBusyId === menuSession.id
 		: false;
 	const menuTakeover = menuSession
-		? canTakeOver && menuSession.source === "leech" && !menuSession.isSubagent
+		? canTakeOver &&
+			menuSession.source === "leech" &&
+			!menuSession.isSubagent &&
+			menuSession.ownerPid !== undefined
 		: false;
 
 	if (sessions.length === 0) {

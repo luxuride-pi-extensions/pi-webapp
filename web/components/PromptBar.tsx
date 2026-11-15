@@ -6,7 +6,10 @@ export interface PromptBarProps {
 	target: SessionNode | null;
 	onSend: (text: string, deliverAs: DeliverAs) => Promise<PromptResponse>;
 	disabled?: boolean;
-	/** Offered instead of a disabled input while a leeched session is selected. */
+	/**
+	 * Only needed when another pi process still holds the transcript. A leeched
+	 * session nobody is running can simply be prompted: the dashboard resumes it.
+	 */
 	onTakeOver?: (target: SessionNode) => void;
 	takingOver?: boolean;
 }
@@ -27,9 +30,17 @@ export function PromptBar({ target, onSend, disabled = false, onTakeOver, taking
 		};
 	}, []);
 
-	const blocked = !target || target.source === "leech" || disabled;
+	// A leeched transcript that no pi process owns is idle: prompting it resumes
+	// it in a fresh process. Only an owner that is still running needs a takeover.
 	const leeched = target?.source === "leech";
-	const hint = !target ? "Select a session to send a prompt." : null;
+	const owned = leeched && target?.ownerPid !== undefined;
+	const idleLeech = leeched && !owned;
+	const blocked = !target || owned || disabled;
+	const hint = !target
+		? "Select a session to send a prompt."
+		: idleLeech
+			? "Not running in pi — sending resumes this transcript in a new pi process."
+			: null;
 	const name = target ? sessionName(target) : "session";
 	const label = target ? `Send to ${name}` : "Send";
 
@@ -51,19 +62,23 @@ export function PromptBar({ target, onSend, disabled = false, onTakeOver, taking
 		sentTimer.current = window.setTimeout(() => setSent(false), 3_000);
 	}, [text, target, blocked, sending, onSend, deliverAs]);
 
-	if (leeched && target) {
+	if (owned && target) {
+		const pid = target.ownerPid;
+		const busy = target.ownerBusy === true;
 		return (
 			<div class="flex items-center gap-3 border-t border-base-300 bg-base-100 px-3 py-2 text-xs">
 				<span class="min-w-0 truncate opacity-70">
-					Leeched transcript — read only until it is resumed in a pi process.
+					{busy
+						? `Busy in pi pid ${pid} — wait for the current turn to finish.`
+						: `Still open in pi pid ${pid} — take it over to prompt it from here.`}
 				</span>
-				{onTakeOver && (
+				{onTakeOver && !busy && (
 					<button
 						type="button"
 						class="btn btn-primary btn-xs ml-auto shrink-0"
 						disabled={takingOver}
 						onClick={() => onTakeOver(target)}
-						title="Resume this session in a new pi process and prompt it from here"
+						title="Stop the owning pi process and resume this session in a new one"
 					>
 						{takingOver && <span class="loading loading-spinner loading-xs" />}
 						{takingOver ? "taking over…" : "take over"}
@@ -97,6 +112,7 @@ export function PromptBar({ target, onSend, disabled = false, onTakeOver, taking
 					placeholder={hint ?? `Message ${name}…  ⏎ send · ⇧⏎ newline`}
 					disabled={blocked || sending}
 					aria-label={label}
+					data-testid="prompt-input"
 					onInput={(event) => setText(event.currentTarget.value)}
 					onKeyDown={(event) => {
 						if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
