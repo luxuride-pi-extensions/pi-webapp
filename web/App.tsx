@@ -126,7 +126,7 @@ function TopBar({
 				<span class="join shrink-0 rounded-lg border border-base-300/70 bg-base-200/40">
 					<button
 						type="button"
-						class={`btn btn-square btn-sm join-item w-9 ${expandAll ? "btn-secondary" : "btn-ghost"}`}
+						class={`btn btn-square btn-sm join-item w-9 ${expandAll ? "btn-secondary" : "btn-ghost text-base-content/70"}`}
 						onClick={onToggleExpand}
 						aria-pressed={expandAll}
 						aria-label={expandAll ? "Collapse everything" : "Expand all sessions, subagents and messages"}
@@ -231,7 +231,7 @@ function SessionHeader({
 					{canTakeOver && (
 						<button
 							type="button"
-							class="btn btn-ghost btn-sm btn-square w-9"
+							class="btn btn-ghost btn-sm btn-square w-9 text-base-content/70"
 							disabled={busy}
 							onClick={() => onTakeOver?.(session)}
 							aria-label="Take over this session"

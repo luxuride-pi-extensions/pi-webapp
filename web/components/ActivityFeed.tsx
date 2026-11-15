@@ -246,6 +246,7 @@ function renderAssistant({ event, sessions, selectedId, expandAll }: RenderProps
 			{reasoning && (
 				<details class="w-full max-w-[min(46rem,100%)]" open={expandAll} data-testid="thinking">
 					<summary class="flex cursor-pointer list-none items-baseline gap-2 text-micro opacity-55 transition-opacity hover:opacity-80">
+						<span class="shrink-0 w-2 opacity-70" aria-hidden="true">▸</span>
 						<span class="shrink-0 uppercase tracking-wide">thinking</span>
 						<span class="line-clamp-1 min-w-0 flex-1 italic">{oneLine(reasoning, 140)}</span>
 					</summary>
