@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "preact/hooks";
+import { useCallback, useEffect, useMemo, useState } from "preact/hooks";
 import type { SessionNode, SpawnRecord } from "../../src/protocol.js";
 import { StatusBadge } from "./StatusBadge";
 
@@ -101,9 +101,7 @@ interface TreeRowProps {
 	takeoverBusyId: string | null;
 	onToggle: (id: string) => void;
 	onSelect: (id: string) => void;
-	onStopSpawn?: (spawnId: string) => void;
-	onTakeOver?: (session: SessionNode) => void;
-	onRemove?: (session: SessionNode) => void;
+	onContextMenu: (session: SessionNode, x: number, y: number) => void;
 }
 
 function TreeRow({
@@ -115,9 +113,7 @@ function TreeRow({
 	takeoverBusyId,
 	onToggle,
 	onSelect,
-	onStopSpawn,
-	onTakeOver,
-	onRemove,
+	onContextMenu,
 }: TreeRowProps) {
 	const { session, children } = node;
 	const name = session.agentName ?? "session";
@@ -127,7 +123,6 @@ function TreeRow({
 	const spawnId = session.spawnId;
 	const spawnActive = spawnId ? activeSpawnIds.has(spawnId) : false;
 	const takeoverPending = !!session.takeoverSpawnId || takeoverBusyId === session.id;
-	const takeoverAvailable = canTakeOver && session.source === "leech" && !session.isSubagent && !!onTakeOver;
 	return (
 		<div class="tree-node" data-testid="session-row" data-session-id={session.id}>
 			<div
@@ -136,6 +131,12 @@ function TreeRow({
 						? "border-primary/40 bg-primary/15"
 						: "border-transparent hover:border-base-300 hover:bg-base-300/50"
 				}`}
+				onContextMenu={(event) => {
+					event.preventDefault();
+					onSelect(session.id);
+					onContextMenu(session, event.clientX, event.clientY);
+				}}
+				data-testid="session-row-body"
 			>
 				<button
 					type="button"
@@ -203,47 +204,10 @@ function TreeRow({
 						<span class="loading loading-spinner loading-xs" />
 					</span>
 				)}
-				{!takeoverPending && takeoverAvailable && (
-					<button
-						type="button"
-						class="mt-1.5 flex size-5 shrink-0 items-center justify-center rounded text-[12px] opacity-0 transition hover:bg-primary/20 hover:text-primary focus-visible:opacity-100 group-hover:opacity-60"
-						title="Take over this session — resume it in a new pi process"
-						aria-label={`Take over ${name}`}
-						onClick={(event) => {
-							event.stopPropagation();
-							onTakeOver?.(session);
-						}}
-					>
-						↻
-					</button>
-				)}
-				{onRemove && (
-					<button
-						type="button"
-						class="mt-1.5 flex size-5 shrink-0 items-center justify-center rounded text-[12px] opacity-0 transition hover:bg-error/20 hover:text-error focus-visible:opacity-100 group-hover:opacity-60"
-						title="Remove this session from the dashboard"
-						aria-label={`Remove ${name}`}
-						onClick={(event) => {
-							event.stopPropagation();
-							onRemove(session);
-						}}
-					>
-						⌫
-					</button>
-				)}
-				{spawnId && spawnActive && onStopSpawn && (
-					<button
-						type="button"
-						class="mt-1.5 flex size-5 shrink-0 items-center justify-center rounded text-[11px] opacity-0 transition hover:bg-error/20 hover:text-error focus-visible:opacity-100 group-hover:opacity-60"
-						title="Stop this pi process"
-						aria-label={`Stop ${name}`}
-						onClick={(event) => {
-							event.stopPropagation();
-							onStopSpawn(spawnId);
-						}}
-					>
-						✕
-					</button>
+				{spawnActive && (
+					<span class="mt-2 shrink-0 text-[10px] opacity-40" title="Started from the dashboard">
+						●
+					</span>
 				)}
 			</div>
 			{expanded && (
@@ -259,9 +223,7 @@ function TreeRow({
 							takeoverBusyId={takeoverBusyId}
 							onToggle={onToggle}
 							onSelect={onSelect}
-							onStopSpawn={onStopSpawn}
-							onTakeOver={onTakeOver}
-							onRemove={onRemove}
+							onContextMenu={onContextMenu}
 						/>
 					))}
 				</div>
@@ -316,6 +278,50 @@ export function SessionTree({
 		},
 		[expandedIds],
 	);
+	const [menu, setMenu] = useState<{ sessionId: string; x: number; y: number } | null>(null);
+	const openMenu = useCallback((session: SessionNode, x: number, y: number) => {
+		setMenu({ sessionId: session.id, x, y });
+	}, []);
+	const closeMenu = useCallback(() => setMenu(null), []);
+	useEffect(() => {
+		if (!menu) return;
+		const onPointerDown = (event: Event) => {
+			const target = event.target as Element | null;
+			if (target?.closest('[data-testid="session-menu"]')) return;
+			closeMenu();
+		};
+		const onKeyDown = (event: KeyboardEvent) => {
+			if (event.key === "Escape") closeMenu();
+		};
+		window.addEventListener("pointerdown", onPointerDown);
+		window.addEventListener("keydown", onKeyDown);
+		window.addEventListener("resize", closeMenu);
+		window.addEventListener("blur", closeMenu);
+		return () => {
+			window.removeEventListener("pointerdown", onPointerDown);
+			window.removeEventListener("keydown", onKeyDown);
+			window.removeEventListener("resize", closeMenu);
+			window.removeEventListener("blur", closeMenu);
+		};
+	}, [menu, closeMenu]);
+	const canTakeOver = !!onTakeOver;
+	const menuSession = menu ? sessions.find((session) => session.id === menu.sessionId) : undefined;
+	const menuStyle = menu
+		? {
+				left: `${Math.min(menu.x, Math.max(0, window.innerWidth - 240))}px`,
+				top: `${Math.min(menu.y, Math.max(0, window.innerHeight - 220))}px`,
+			}
+		: undefined;
+	const menuHasChildren = menuSession
+		? sessions.some((session) => session.parentSessionId === menuSession.id)
+		: false;
+	const menuSpawnId = menuSession?.spawnId;
+	const menuTakeoverPending = menuSession
+		? !!menuSession.takeoverSpawnId || takeoverBusyId === menuSession.id
+		: false;
+	const menuTakeover = menuSession
+		? canTakeOver && menuSession.source === "leech" && !menuSession.isSubagent
+		: false;
 
 	if (sessions.length === 0) {
 		return (
@@ -392,13 +398,86 @@ export function SessionTree({
 							takeoverBusyId={takeoverBusyId}
 							onToggle={onToggle}
 							onSelect={onSelect}
-							onStopSpawn={onStopSpawn}
-							onTakeOver={onTakeOver}
-							onRemove={onRemove}
+							onContextMenu={openMenu}
 						/>
 					))
 				)}
 			</nav>
+			{menu && menuSession ? (
+				<ul
+					class="menu menu-sm fixed z-50 w-56 rounded-box border border-base-300 bg-base-200 p-1 shadow-2xl"
+					style={menuStyle}
+					data-testid="session-menu"
+					role="menu"
+				>
+					<li class="menu-title py-0.5 text-[10px] tracking-wide uppercase">
+						<span class="max-w-44 truncate normal-case">{menuSession.agentName ?? "session"}</span>
+					</li>
+					{menuHasChildren && (
+						<li>
+							<button
+								type="button"
+								draggable={false}
+								onClick={() => {
+									onToggle(menuSession.id);
+									closeMenu();
+							}}
+								data-testid="menu-toggle"
+							>
+								{expandedIds.has(menuSession.id) ? "Collapse subagents" : "Expand subagents"}
+							</button>
+						</li>
+					)}
+					{menuTakeover && onTakeOver && (
+						<li>
+							<button
+								type="button"
+								draggable={false}
+								disabled={menuTakeoverPending}
+								data-testid="menu-takeover"
+								title="Resume this transcript in a new pi process"
+								onClick={() => {
+									closeMenu();
+									onTakeOver(menuSession);
+								}}
+							>
+								{menuTakeoverPending ? "Resuming…" : "Take over session"}
+							</button>
+						</li>
+					)}
+					{menuSpawnId && activeSpawnIds.has(menuSpawnId) && onStopSpawn && (
+						<li>
+							<button
+								type="button"
+								draggable={false}
+								data-testid="menu-stop"
+								onClick={() => {
+									closeMenu();
+									onStopSpawn(menuSpawnId);
+								}}
+							>
+								Stop pi process
+							</button>
+						</li>
+					)}
+					{onRemove && (
+						<li>
+							<button
+								type="button"
+								draggable={false}
+								class="text-error"
+								data-testid="menu-remove"
+								onClick={() => {
+									closeMenu();
+									onRemove(menuSession);
+								}}
+							>
+								Remove session
+							</button>
+						</li>
+					)}
+				</ul>
+			) : null}
 		</div>
 	);
 }

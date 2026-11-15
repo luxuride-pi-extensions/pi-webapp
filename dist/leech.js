@@ -7,6 +7,7 @@
  * always marked with source "leech" so consumers can prefer live data.
  */
 import { scanPiSessionOwners, sessionIdFromSessionFile } from "./procs.js";
+import { existsSync } from "node:fs";
 import { open, readdir, stat as statFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { clearInterval, setInterval } from "node:timers";
@@ -186,6 +187,7 @@ export class SessionLeech {
     maxAgeMs;
     replayLimit;
     ignoreSession;
+    onSessionsRemoved;
     onEvent;
     files = new Map();
     sessionIds = new Set();
@@ -212,6 +214,7 @@ export class SessionLeech {
                 ? Math.max(0, Math.floor(options.replayLimit))
                 : DEFAULT_REPLAY_LIMIT;
         this.ignoreSession = options.ignoreSession;
+        this.onSessionsRemoved = options.onSessionsRemoved;
         this.onEvent = options.onEvent;
     }
     get running() {
@@ -324,13 +327,27 @@ export class SessionLeech {
                 continue;
             headers.set(filePath, header);
         }
-        for (const filePath of [...this.files.keys()]) {
-            if (!headers.has(filePath))
-                this.files.delete(filePath);
-        }
         this.sessionIds.clear();
         for (const id of fileToSessionId.values())
             this.sessionIds.add(id);
+        // Transcripts deleted on disk must disappear from the dashboard instead of
+        // lingering until the next full reload.
+        const vanished = [];
+        for (const [filePath, state] of [...this.files.entries()]) {
+            if (headers.has(filePath))
+                continue;
+            this.files.delete(filePath);
+            if (!this.sessionIds.has(state.sessionId) && !existsSync(filePath))
+                vanished.push(state.sessionId);
+        }
+        if (vanished.length > 0) {
+            try {
+                this.onSessionsRemoved?.([...new Set(vanished)]);
+            }
+            catch (error) {
+                this.recordError(error, "leech removal");
+            }
+        }
         for (const [filePath, fileStat] of listing) {
             const header = headers.get(filePath);
             if (!header)

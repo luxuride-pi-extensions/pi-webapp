@@ -319,6 +319,7 @@ export class WebappServer {
                     intervalMs,
                     maxAgeMs,
                     ignoreSession: (id) => this.sessions.get(id)?.source === "live",
+                    onSessionsRemoved: (ids) => this.handleVanishedSessions(ids),
                     onEvent: (event) => this.ingest(event),
                 });
             }
@@ -591,14 +592,10 @@ export class WebappServer {
         const node = this.sessions.get(sessionId);
         if (!node)
             throw new HttpError(404, "session not found");
-        const removed = new Set([sessionId]);
-        for (const candidate of this.sessions.values()) {
-            if (candidate.parentSessionId === sessionId)
-                removed.add(candidate.id);
-        }
+        const targets = this.sessionFamily(sessionId);
         const spawner = this.spawner;
         if (spawner) {
-            for (const id of removed) {
+            for (const id of targets) {
                 const spawnId = this.sessions.get(id)?.spawnId;
                 if (!spawnId)
                     continue;
@@ -611,29 +608,23 @@ export class WebappServer {
             }
         }
         let deletedFile;
-        for (const id of removed) {
-            const target = this.sessions.get(id);
-            this.sessions.delete(id);
-            this.owners.delete(id);
-            this.removedSessions.add(id);
-            this.pendingSessionCommands.delete(id);
-            for (const ids of this.instanceSessions.values())
-                ids.delete(id);
-            if (options.deleteFile && target?.sessionFile && target.sessionFile.endsWith(".jsonl")) {
+        if (options.deleteFile) {
+            for (const id of targets) {
+                const file = this.sessions.get(id)?.sessionFile;
+                if (!file || !file.endsWith(".jsonl"))
+                    continue;
                 try {
-                    await unlink(target.sessionFile);
-                    deletedFile = target.sessionFile;
+                    await unlink(file);
+                    deletedFile = file;
                 }
                 catch {
                     /* missing file: nothing to delete */
                 }
             }
         }
-        for (let index = this.events.length - 1; index >= 0; index -= 1) {
-            const event = this.events[index];
-            if (event && removed.has(event.sessionId))
-                this.events.splice(index, 1);
-        }
+        const removed = this.dropSessions(targets);
+        for (const id of removed)
+            this.removedSessions.add(id);
         // Keep the tombstone list bounded.
         while (this.removedSessions.size > 500) {
             const oldest = this.removedSessions.values().next().value;
@@ -642,8 +633,57 @@ export class WebappServer {
             this.removedSessions.delete(oldest);
         }
         await this.persistRemovedSessions();
-        this.broadcast({ type: "session_removed", sessionIds: [...removed] });
-        return { removed: [...removed], deletedFile };
+        if (removed.length > 0)
+            this.broadcast({ type: "session_removed", sessionIds: removed });
+        return { removed, deletedFile };
+    }
+    /** Transcripts deleted on disk disappear from the dashboard on the next scan. */
+    handleVanishedSessions(sessionIds) {
+        const leeched = sessionIds.filter((id) => this.sessions.get(id)?.source === "leech");
+        if (leeched.length === 0)
+            return;
+        const removed = this.dropSessions(leeched);
+        if (removed.length > 0)
+            this.broadcast({ type: "session_removed", sessionIds: removed });
+    }
+    /** Ids of a session plus every subagent nested (transitively) under it. */
+    sessionFamily(sessionId) {
+        const family = new Set([sessionId]);
+        let grew = true;
+        while (grew) {
+            grew = false;
+            for (const candidate of this.sessions.values()) {
+                if (family.has(candidate.id))
+                    continue;
+                if (candidate.parentSessionId && family.has(candidate.parentSessionId)) {
+                    family.add(candidate.id);
+                    grew = true;
+                }
+            }
+        }
+        return [...family];
+    }
+    /** Forgets the given sessions and their events without touching tombstones. */
+    dropSessions(sessionIds) {
+        const removed = [];
+        for (const id of sessionIds) {
+            if (!this.sessions.delete(id))
+                continue;
+            removed.push(id);
+            this.owners.delete(id);
+            this.pendingSessionCommands.delete(id);
+            for (const ids of this.instanceSessions.values())
+                ids.delete(id);
+        }
+        if (removed.length > 0) {
+            const dropped = new Set(removed);
+            for (let index = this.events.length - 1; index >= 0; index -= 1) {
+                const event = this.events[index];
+                if (event && dropped.has(event.sessionId))
+                    this.events.splice(index, 1);
+            }
+        }
+        return removed;
     }
     removedSessionsPath() {
         return path.join(this.artifactsRoot, ".removed-sessions.json");

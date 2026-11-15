@@ -497,6 +497,13 @@ try {
 	const scanBody = await scanResponse.json();
 	assert.equal(scanBody.enabled, true, "leech scan response must report enabled: true");
 
+	// A transcript deleted on disk must leave the dashboard on the next scan.
+	await rm(leechFile, { force: true });
+	await waitFor("leeched session to disappear with its transcript", async () => {
+		const current = await getState();
+		return current.sessions.some((session) => session.id === leechId) ? null : current;
+	});
+
 	step("9. spawn API");
 	const spawnCwd = path.join(tmpRoot, "spawn-cwd");
 	await mkdir(spawnCwd, { recursive: true });
