@@ -1,19 +1,22 @@
-import { WabappClient } from "./client.js";
-import type { LeechStatus, PromptCommand, WabappEvent } from "./protocol.js";
-import { WabappServer } from "./server.js";
+import { WebappClient } from "./client.js";
+import type { LeechStatus, PromptCommand, WebappEvent } from "./protocol.js";
+import { WebappServer } from "./server.js";
 import type { LocalPromptHandler } from "./server.js";
+import { SessionSpawner } from "./spawn.js";
 import { pruneArtifacts } from "./storage.js";
 
 export interface BridgeOptions {
 	instanceId: string;
 	host: string;
 	port: number;
+	/** `false` disables the dashboard's ability to launch pi sessions. */
+	spawn?: { rootDir?: string; cwd?: string; sessionDir?: string } | false;
 }
 
 export interface BridgeRuntime {
 	mode: "primary" | "client";
 	url: string;
-	emit(event: WabappEvent): void;
+	emit(event: WebappEvent): void;
 	setPromptHandler(handler: LocalPromptHandler | null): void;
 	rescanLeech(dirs?: string[]): Promise<LeechStatus>;
 	getLeechStatus(): Promise<LeechStatus> | LeechStatus;
@@ -53,7 +56,7 @@ async function requestJson(url: string, init: RequestInit): Promise<unknown> {
 		signal: AbortSignal.timeout(LEECH_TIMEOUT_MS),
 	});
 	if (!response.ok) {
-		throw new Error(`pi-wabapp: request to ${url} failed with status ${response.status}`);
+		throw new Error(`pi-webapp: request to ${url} failed with status ${response.status}`);
 	}
 	return response.json();
 }
@@ -63,7 +66,7 @@ async function createClientBridge(
 	handlerRef: { current: LocalPromptHandler | null },
 ): Promise<BridgeRuntime> {
 	const baseUrl = `http://${options.host}:${options.port}`;
-	const client = new WabappClient({
+	const client = new WebappClient({
 		baseUrl,
 		instanceId: options.instanceId,
 		onCommand: async (command: PromptCommand) => {
@@ -85,7 +88,7 @@ async function createClientBridge(
 	return {
 		mode: "client",
 		url: baseUrl,
-		emit(event: WabappEvent) {
+		emit(event: WebappEvent) {
 			client.emit(event);
 		},
 		setPromptHandler(handler: LocalPromptHandler | null) {
@@ -124,7 +127,7 @@ async function createClientBridge(
 }
 
 export async function createBridge(options: BridgeOptions): Promise<BridgeRuntime> {
-	const server = new WabappServer({ host: options.host, port: options.port });
+	const server = new WebappServer({ host: options.host, port: options.port });
 	try {
 		await server.start();
 	} catch (error) {
@@ -146,11 +149,27 @@ export async function createBridge(options: BridgeOptions): Promise<BridgeRuntim
 		// pruning old artifacts is optional
 	}
 
+	let spawner: SessionSpawner | null = null;
+	if (options.spawn !== false) {
+		try {
+			spawner = new SessionSpawner({
+				rootDir: options.spawn?.rootDir,
+				baseUrl: server.url,
+				cwd: options.spawn?.cwd,
+				sessionDir: options.spawn?.sessionDir,
+				onChange: (record) => server.notifySpawnChange(record),
+			});
+			server.setSessionSpawner(spawner);
+		} catch {
+			spawner = null;
+		}
+	}
+
 	let stopped = false;
 	return {
 		mode: "primary",
 		url: server.url,
-		emit(event: WabappEvent) {
+		emit(event: WebappEvent) {
 			server.ingest(event);
 		},
 		setPromptHandler(handler: LocalPromptHandler | null) {
@@ -165,6 +184,11 @@ export async function createBridge(options: BridgeOptions): Promise<BridgeRuntim
 		async shutdown(): Promise<void> {
 			if (stopped) return;
 			stopped = true;
+			try {
+				spawner?.stopAll();
+			} catch {
+				// ignore
+			}
 			try {
 				await server.stop();
 			} catch {

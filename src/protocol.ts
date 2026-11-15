@@ -6,22 +6,30 @@
 
 export const DEFAULT_HOST = "127.0.0.1";
 export const DEFAULT_PORT = 8787;
-export const CACHE_DIR_NAME = "pi-wabapp";
+export const CACHE_DIR_NAME = "pi-webapp";
 export const EVENT_HISTORY_LIMIT = 4000;
 export const MAX_MEDIA_BYTES = 512 * 1024 * 1024;
 export const WATCH_INTERVAL_MS = 1500;
 
 /** Environment variables understood by the extension and by child pi processes. */
 export const ENV = {
-	host: "PI_WABAPP_HOST",
-	port: "PI_WABAPP_PORT",
-	cacheDir: "PI_WABAPP_CACHE_DIR",
-	leech: "PI_WABAPP_LEECH",
-	leechDir: "PI_WABAPP_LEECH_DIR",
-	playwright: "PI_WABAPP_PLAYWRIGHT",
+	host: "PI_WEBAPP_HOST",
+	port: "PI_WEBAPP_PORT",
+	cacheDir: "PI_WEBAPP_CACHE_DIR",
+	leech: "PI_WEBAPP_LEECH",
+	leechDir: "PI_WEBAPP_LEECH_DIR",
+	playwright: "PI_WEBAPP_PLAYWRIGHT",
+	/** Set to 0 to forbid the dashboard from launching pi processes. */
+	spawn: "PI_WEBAPP_SPAWN",
+	/** Overrides the `pi` executable used for dashboard-spawned sessions. */
+	piBin: "PI_WEBAPP_PI_BIN",
+	/** Extra `--session-dir` for spawned sessions. */
+	sessionDir: "PI_WEBAPP_SESSION_DIR",
+	/** Identifies a session started by the dashboard (read by the child pi). */
+	spawnId: "PI_WEBAPP_SPAWN_ID",
 	/** Propagated into child `pi` processes spawned as subagents. */
-	parentSessionId: "PI_WABAPP_PARENT_SESSION_ID",
-	agentName: "PI_WABAPP_AGENT_NAME",
+	parentSessionId: "PI_WEBAPP_PARENT_SESSION_ID",
+	agentName: "PI_WEBAPP_AGENT_NAME",
 	/** Common aliases used by out-of-process subagent launchers. */
 	legacyParentSessionId: "PI_PARENT_SESSION_ID",
 	legacyAgentName: "PI_SUBAGENT_NAME",
@@ -45,7 +53,7 @@ export function isSubagentToolName(name: string): boolean {
 export type SessionStatus = "running" | "completed" | "failed";
 export type SessionSource = "live" | "leech";
 
-export type WabappEventType =
+export type WebappEventType =
 	| "session_started"
 	| "session_ended"
 	| "session_meta"
@@ -71,11 +79,11 @@ export interface MediaAsset {
 	mime: string;
 }
 
-export type WabappEventData = Record<string, unknown>;
+export type WebappEventData = Record<string, unknown>;
 
-export interface WabappEvent {
+export interface WebappEvent {
 	id: string;
-	type: WabappEventType;
+	type: WebappEventType;
 	/** Session that produced the event. For subagent events this is the child. */
 	sessionId: string;
 	/** Root/parent session, used to bubble subagent activity into the parent feed. */
@@ -84,7 +92,7 @@ export interface WabappEvent {
 	isSubagent?: boolean;
 	source?: SessionSource;
 	timestamp: number;
-	data: WabappEventData;
+	data: WebappEventData;
 }
 
 export interface SessionNode {
@@ -103,7 +111,61 @@ export interface SessionNode {
 	/** Task prompt for subagents. */
 	task?: string;
 	sessionFile?: string;
-	lastEventType?: WabappEventType;
+	lastEventType?: WebappEventType;
+	/** Set when the dashboard launched this session's pi process. */
+	spawnId?: string;
+}
+
+export type SpawnStatus = "starting" | "running" | "exited" | "failed";
+
+/** Request body accepted by `POST /api/spawn`. */
+export interface SpawnRequest {
+	cwd: string;
+	prompt?: string;
+	model?: string;
+	agentName?: string;
+	sessionFile?: string;
+	extraArgs?: string[];
+}
+
+/** A pi process started by the dashboard ("New session"). */
+export interface SpawnRecord {
+	spawnId: string;
+	pid?: number;
+	cwd: string;
+	status: SpawnStatus;
+	startedAt: number;
+	endedAt?: number;
+	exitCode?: number;
+	sessionId?: string;
+	prompt?: string;
+	model?: string;
+	agentName?: string;
+	sessionFile?: string;
+	logFile?: string;
+	error?: string;
+}
+
+export interface SpawnState {
+	enabled: boolean;
+	spawns: SpawnRecord[];
+	/** Working directory used when a spawn request omits one. */
+	defaultCwd?: string;
+}
+
+/** Structural contract implemented by `SessionSpawner` (src/spawn.ts). */
+export interface SessionSpawnerLike {
+	readonly available: boolean;
+	readonly enabled: boolean;
+	readonly piBin: string;
+	readonly defaultWorkingDir: string;
+	spawn(request: SpawnRequest): Promise<SpawnRecord>;
+	stop(spawnId: string): boolean;
+	list(): SpawnRecord[];
+	get(spawnId: string): SpawnRecord | null;
+	attachSession(spawnId: string, sessionId: string): void;
+	logTail(spawnId: string, maxBytes?: number): string | null;
+	stopAll(): void;
 }
 
 export interface LeechStatus {
@@ -118,9 +180,11 @@ export interface LeechStatus {
 
 export interface ServerState {
 	sessions: SessionNode[];
-	events: WabappEvent[];
+	events: WebappEvent[];
 	counts: { sessions: number; subagents: number; events: number };
 	leech: LeechStatus;
+	/** Dashboard-launched pi processes and whether spawning is allowed. */
+	spawn: SpawnState;
 	serverTime: number;
 }
 
@@ -144,8 +208,10 @@ export interface PromptResponse {
 
 export type ServerToClientMessage =
 	| { type: "snapshot"; state: ServerState }
-	| { type: "event"; event: WabappEvent }
+	| { type: "event"; event: WebappEvent }
 	| { type: "session"; session: SessionNode }
+	| { type: "spawn"; spawn: SpawnRecord }
+	| { type: "spawns"; state: SpawnState }
 	| { type: "command"; command: PromptCommand }
 	| { type: "hello_ok"; instanceId: string }
 	| { type: "pong" };
@@ -156,16 +222,16 @@ export type ClientToServerMessage =
 	| { type: "ping" };
 
 export function makeEvent(input: {
-	type: WabappEventType;
+	type: WebappEventType;
 	sessionId: string;
 	parentSessionId?: string;
 	agentName?: string;
 	isSubagent?: boolean;
 	source?: SessionSource;
 	timestamp?: number;
-	data?: WabappEventData;
-}): WabappEvent {
-	const event: WabappEvent = {
+	data?: WebappEventData;
+}): WebappEvent {
+	const event: WebappEvent = {
 		id: newId("evt"),
 		type: input.type,
 		sessionId: input.sessionId,

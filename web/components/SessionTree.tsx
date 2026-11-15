@@ -1,11 +1,14 @@
 import { useCallback, useMemo, useState } from "preact/hooks";
-import type { SessionNode } from "../../src/protocol.js";
+import type { SessionNode, SpawnRecord } from "../../src/protocol.js";
 import { StatusBadge } from "./StatusBadge";
 
 export interface SessionTreeProps {
 	sessions: SessionNode[];
 	selectedSessionId: string | null;
 	onSelect: (id: string) => void;
+	/** Dashboard-launched processes, used to gate the per-session stop button. */
+	spawns?: SpawnRecord[];
+	onStopSpawn?: (spawnId: string) => void;
 }
 
 interface TreeNode {
@@ -61,16 +64,20 @@ interface TreeRowProps {
 	node: TreeNode;
 	selectedSessionId: string | null;
 	collapsed: ReadonlySet<string>;
+	activeSpawnIds: ReadonlySet<string>;
 	onToggle: (id: string) => void;
 	onSelect: (id: string) => void;
+	onStopSpawn?: (spawnId: string) => void;
 }
 
-function TreeRow({ node, selectedSessionId, collapsed, onToggle, onSelect }: TreeRowProps) {
+function TreeRow({ node, selectedSessionId, collapsed, activeSpawnIds, onToggle, onSelect, onStopSpawn }: TreeRowProps) {
 	const { session, children } = node;
 	const name = session.agentName ?? "session";
 	const selected = selectedSessionId === session.id;
 	const hasChildren = children.length > 0;
 	const expanded = hasChildren && !collapsed.has(session.id);
+	const spawnId = session.spawnId;
+	const spawnActive = spawnId ? activeSpawnIds.has(spawnId) : false;
 	return (
 		<div class="tree-node">
 			<div
@@ -104,6 +111,11 @@ function TreeRow({ node, selectedSessionId, collapsed, onToggle, onSelect }: Tre
 						/>
 						<span class="truncate text-sm font-medium">{name}</span>
 						<StatusBadge status={session.status} source={session.source} />
+						{spawnId && (
+							<span class="badge badge-ghost badge-xs font-mono" title="Started from the dashboard">
+								dashboard
+							</span>
+						)}
 						{hasChildren && <span class="ml-auto badge badge-ghost badge-xs">{children.length}</span>}
 					</span>
 					<span class="flex min-w-0 items-center gap-2 text-[11px] opacity-60">
@@ -113,6 +125,20 @@ function TreeRow({ node, selectedSessionId, collapsed, onToggle, onSelect }: Tre
 						<time class="ml-auto shrink-0 font-mono">{relativeTime(session.startedAt)}</time>
 					</span>
 				</button>
+				{spawnId && spawnActive && onStopSpawn && (
+					<button
+						type="button"
+						class="mt-1 flex size-5 shrink-0 items-center justify-center rounded text-[11px] opacity-50 hover:bg-error/20 hover:text-error hover:opacity-100"
+						title="Stop this pi process"
+						aria-label={`Stop ${name}`}
+						onClick={(event) => {
+							event.stopPropagation();
+							onStopSpawn(spawnId);
+						}}
+					>
+						✕
+					</button>
+				)}
 			</div>
 			{expanded && (
 				<div class="tree-children">
@@ -122,8 +148,10 @@ function TreeRow({ node, selectedSessionId, collapsed, onToggle, onSelect }: Tre
 							node={child}
 							selectedSessionId={selectedSessionId}
 							collapsed={collapsed}
+							activeSpawnIds={activeSpawnIds}
 							onToggle={onToggle}
 							onSelect={onSelect}
+							onStopSpawn={onStopSpawn}
 						/>
 					))}
 				</div>
@@ -132,9 +160,22 @@ function TreeRow({ node, selectedSessionId, collapsed, onToggle, onSelect }: Tre
 	);
 }
 
-export function SessionTree({ sessions, selectedSessionId, onSelect }: SessionTreeProps) {
+export function SessionTree({
+	sessions,
+	selectedSessionId,
+	onSelect,
+	spawns = [],
+	onStopSpawn,
+}: SessionTreeProps) {
 	const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
 	const forest = useMemo(() => buildForest(sessions), [sessions]);
+	const activeSpawnIds = useMemo(
+		() =>
+			new Set(
+				spawns.filter((spawn) => spawn.status === "starting" || spawn.status === "running").map((spawn) => spawn.spawnId),
+			),
+		[spawns],
+	);
 	const onToggle = useCallback((id: string) => {
 		setCollapsed((previous) => {
 			const next = new Set(previous);
@@ -147,12 +188,13 @@ export function SessionTree({ sessions, selectedSessionId, onSelect }: SessionTr
 	if (sessions.length === 0) {
 		return (
 			<div class="p-3">
-				<div class="alert alert-info items-start p-3 text-xs">
+				<div class="alert items-start border border-base-300 bg-base-200 p-3 text-xs">
 					<div class="space-y-1">
 						<p class="font-semibold">No sessions yet</p>
 						<p>
-							Start <code class="font-mono text-primary">pi</code> with the pi-wabapp extension, or set{" "}
-							<code class="font-mono text-primary">PI_WABAPP_LEECH=1</code> to tail existing transcripts.
+							Start a session with the <span class="font-semibold">New session</span> button, run{" "}
+							<code class="rounded bg-base-300 px-1 font-mono">pi</code> with the pi-webapp extension installed, or set{" "}
+							<code class="rounded bg-base-300 px-1 font-mono">PI_WEBAPP_LEECH=1</code> to tail existing transcripts.
 						</p>
 					</div>
 				</div>
@@ -168,8 +210,10 @@ export function SessionTree({ sessions, selectedSessionId, onSelect }: SessionTr
 					node={node}
 					selectedSessionId={selectedSessionId}
 					collapsed={collapsed}
+					activeSpawnIds={activeSpawnIds}
 					onToggle={onToggle}
 					onSelect={onSelect}
+					onStopSpawn={onStopSpawn}
 				/>
 			))}
 		</nav>

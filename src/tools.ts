@@ -15,7 +15,7 @@ import {
 	newId,
 	truncate,
 	type MediaAsset,
-	type WabappEvent,
+	type WebappEvent,
 } from "./protocol.js";
 import { getCacheRoot, ingestArtifact } from "./storage.js";
 
@@ -26,12 +26,12 @@ export interface ToolRuntime {
 	isSubagent: boolean;
 	cwd: string;
 	getBridge: () => BridgeRuntime | null;
-	emit: (event: WabappEvent) => void;
+	emit: (event: WebappEvent) => void;
 }
 
 const execFileAsync = promisify(execFile);
 const PLAYWRIGHT_INSTALL_HINT =
-	"Playwright is not installed. Install it with `npm i -D playwright && npx playwright install chromium` (or set PI_WABAPP_PLAYWRIGHT to the playwright binary).";
+	"Playwright is not installed. Install it with `npm i -D playwright && npx playwright install chromium` (or set PI_WEBAPP_PLAYWRIGHT to the playwright binary).";
 const PLAYWRIGHT_CHECK_TIMEOUT_MS = 15_000;
 const PLAYWRIGHT_CAPTURE_TIMEOUT_MS = 120_000;
 const PLAYWRIGHT_MAX_BUFFER = 8 * 1024 * 1024;
@@ -63,7 +63,7 @@ function stderrTail(error: unknown): string {
 
 function requireBridge(runtime: ToolRuntime): BridgeRuntime {
 	const bridge = runtime.getBridge();
-	if (!bridge) throw new Error("pi-wabapp is not connected to a dashboard yet.");
+	if (!bridge) throw new Error("pi-webapp is not connected to a dashboard yet.");
 	return bridge;
 }
 
@@ -75,7 +75,7 @@ function buildWorkStateEvent(
 		url?: string;
 		media: MediaAsset[];
 	},
-): WabappEvent {
+): WebappEvent {
 	return makeEvent({
 		type: "work_state",
 		sessionId: runtime.sessionId,
@@ -97,7 +97,7 @@ function workStateText(
 	title: string,
 	media: MediaAsset[],
 ): string {
-	const lines = [`Posted "${title}" to the pi-wabapp dashboard.`];
+	const lines = [`Posted "${title}" to the pi-webapp dashboard.`];
 	lines.push(`Viewer: ${viewerUrlFor(bridge.url, runtime.sessionId)}`);
 	if (media.length > 0) {
 		lines.push("Artifacts:");
@@ -115,7 +115,7 @@ export function createPostWorkStateTool(
 		name: "post_work_state",
 		label: "Post Work State",
 		description:
-			"Publish a visual milestone to the pi-wabapp dashboard so a human can follow the work while it happens.",
+			"Publish a visual milestone to the pi-webapp dashboard so a human can follow the work while it happens.",
 		promptSnippet:
 			"post_work_state — publish a milestone with a title, optional description/link and optional screenshot or recording.",
 		parameters: Type.Object({
@@ -239,7 +239,7 @@ export function createCapturePlaywrightTool(
 		name: "capture_playwright_snapshot",
 		label: "Capture Playwright Snapshot",
 		description:
-			"Capture a screenshot of a running web app with Playwright and publish it to the pi-wabapp dashboard.",
+			"Capture a screenshot of a running web app with Playwright and publish it to the pi-webapp dashboard.",
 		promptSnippet:
 			"capture_playwright_snapshot — screenshot a URL with Playwright and post it as a visual milestone.",
 		parameters: Type.Object({
@@ -256,7 +256,7 @@ export function createCapturePlaywrightTool(
 			if (!playwright) throw new Error(PLAYWRIGHT_INSTALL_HINT);
 
 			const viewport = parseViewport(params.viewport);
-			const outPath = path.join(os.tmpdir(), `pi-wabapp-shot-${newId()}.png`);
+			const outPath = path.join(os.tmpdir(), `pi-webapp-shot-${newId()}.png`);
 			const args = [
 				...playwright.prefixArgs,
 				"screenshot",
@@ -314,7 +314,7 @@ export function createCapturePlaywrightTool(
 			runtime.emit(event);
 
 			const lines = [
-				`Captured "${params.title}" and posted it to the pi-wabapp dashboard.`,
+				`Captured "${params.title}" and posted it to the pi-webapp dashboard.`,
 				`Viewer: ${viewerUrlFor(bridge.url, runtime.sessionId)}`,
 			];
 			for (const asset of media) {

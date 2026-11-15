@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
-import type { MediaAsset, SessionNode, WabappEvent, WabappEventType } from "../../src/protocol.js";
+import type { MediaAsset, SessionNode, WebappEvent, WebappEventType } from "../../src/protocol.js";
 import { bool, mediaList, num, str } from "../../src/protocol.js";
 import { MarkdownText } from "./MarkdownText";
 import { MediaCard } from "./MediaCard";
 
 export interface ActivityFeedProps {
-	events: WabappEvent[];
+	events: WebappEvent[];
 	sessions: SessionNode[];
 	selected: SessionNode | null;
 	onSelectSession: (id: string) => void;
@@ -15,7 +15,7 @@ export interface ActivityFeedProps {
 const NEAR_BOTTOM_PX = 120;
 const SUMMARY_DETAIL_LIMIT = 160;
 
-const SYSTEM_LABELS: Partial<Record<WabappEventType, string>> = {
+const SYSTEM_LABELS: Partial<Record<WebappEventType, string>> = {
 	session_started: "session started",
 	session_ended: "session ended",
 	session_meta: "session metadata",
@@ -42,11 +42,11 @@ function fieldText(value: unknown): string {
 	}
 }
 
-function eventData(event: WabappEvent): Record<string, unknown> {
+function eventData(event: WebappEvent): Record<string, unknown> {
 	return event.data && typeof event.data === "object" ? event.data : {};
 }
 
-function pickString(event: WabappEvent, keys: readonly string[]): string {
+function pickString(event: WebappEvent, keys: readonly string[]): string {
 	const data = eventData(event);
 	for (const key of keys) {
 		const value = str(data[key]);
@@ -55,7 +55,7 @@ function pickString(event: WabappEvent, keys: readonly string[]): string {
 	return "";
 }
 
-function pickText(event: WabappEvent, keys: readonly string[]): string {
+function pickText(event: WebappEvent, keys: readonly string[]): string {
 	const data = eventData(event);
 	for (const key of keys) {
 		const value = fieldText(data[key]);
@@ -64,7 +64,7 @@ function pickText(event: WabappEvent, keys: readonly string[]): string {
 	return "";
 }
 
-function succeeded(event: WabappEvent): boolean {
+function succeeded(event: WebappEvent): boolean {
 	const data = eventData(event);
 	if (typeof data.success === "boolean") return data.success;
 	if (typeof data.ok === "boolean") return data.ok;
@@ -72,7 +72,7 @@ function succeeded(event: WabappEvent): boolean {
 	return !pickString(event, ["error"]);
 }
 
-function durationMs(event: WabappEvent): number {
+function durationMs(event: WebappEvent): number {
 	const data = eventData(event);
 	return num(data.durationMs) || num(data.duration) || num(data.elapsedMs);
 }
@@ -82,7 +82,7 @@ function formatDuration(ms: number): string {
 	return ms < 1_000 ? `${Math.round(ms)}ms` : `${(ms / 1_000).toFixed(1)}s`;
 }
 
-function resolveChildId(event: WabappEvent, sessions: SessionNode[]): string | null {
+function resolveChildId(event: WebappEvent, sessions: SessionNode[]): string | null {
 	const direct = pickString(event, ["childSessionId", "agentSessionId", "subagentSessionId"]);
 	if (direct && sessions.some((session) => session.id === direct)) return direct;
 	const fromData = pickString(event, ["sessionId"]);
@@ -105,7 +105,7 @@ function SubagentTag({
 	sessions,
 	onSelectSession,
 }: {
-	event: WabappEvent;
+	event: WebappEvent;
 	sessions: SessionNode[];
 	onSelectSession: (id: string) => void;
 }) {
@@ -136,7 +136,7 @@ function OpenSessionButton({ id, name, onSelectSession }: { id: string; name: st
 }
 
 interface RenderProps {
-	event: WabappEvent;
+	event: WebappEvent;
 	showSubagent: boolean;
 	sessions: SessionNode[];
 	onSelectSession: (id: string) => void;

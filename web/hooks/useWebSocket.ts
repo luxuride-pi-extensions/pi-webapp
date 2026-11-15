@@ -6,23 +6,53 @@ import type {
 	ServerState,
 	ServerToClientMessage,
 	SessionNode,
-	WabappEvent,
+	SpawnRecord,
+	SpawnState,
+	WebappEvent,
 } from "../../src/protocol.js";
 import { EVENT_HISTORY_LIMIT } from "../../src/protocol.js";
 
-export interface WabappConnection {
+/** Request body for `POST /api/spawn`. */
+export interface SpawnInput {
+	cwd: string;
+	prompt?: string;
+	model?: string;
+	agentName?: string;
+}
+
+export interface StartSessionResult {
+	ok: boolean;
+	error?: string;
+	spawn?: SpawnRecord;
+}
+
+export interface StopSpawnResult {
+	ok: boolean;
+	error?: string;
+}
+
+export interface WebappConnection {
 	status: "connecting" | "open" | "closed";
 	connected: boolean;
 	state: ServerState | null;
-	events: WabappEvent[];
+	events: WebappEvent[];
 	sessions: SessionNode[];
+	/** pi processes launched by this dashboard, newest last. */
+	spawns: SpawnRecord[];
+	/** False when this instance is not allowed to launch pi processes. */
+	spawnEnabled: boolean;
+	/** Server-provided default working directory for new sessions. */
+	defaultCwd: string;
 	error: string | null;
 	sendPrompt(sessionId: string, text: string, deliverAs: DeliverAs): Promise<PromptResponse>;
 	rescanLeech(): Promise<void>;
+	startSession(input: SpawnInput): Promise<StartSessionResult>;
+	stopSpawn(spawnId: string): Promise<StopSpawnResult>;
 }
 
-const EMPTY_EVENTS: WabappEvent[] = [];
+const EMPTY_EVENTS: WebappEvent[] = [];
 const EMPTY_SESSIONS: SessionNode[] = [];
+const EMPTY_SPAWN_STATE: SpawnState = { enabled: false, spawns: [] };
 const BASE_RECONNECT_MS = 1_000;
 const MAX_RECONNECT_MS = 15_000;
 
@@ -39,6 +69,30 @@ function sortSessions(sessions: SessionNode[]): SessionNode[] {
 	return sessions.slice().sort((a, b) => a.startedAt - b.startedAt || a.id.localeCompare(b.id));
 }
 
+function sortSpawns(spawns: SpawnRecord[]): SpawnRecord[] {
+	return spawns
+		.slice()
+		.sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0) || a.spawnId.localeCompare(b.spawnId));
+}
+
+function isSpawnRecord(value: unknown): value is SpawnRecord {
+	if (!value || typeof value !== "object") return false;
+	const record = value as { spawnId?: unknown };
+	return typeof record.spawnId === "string" && record.spawnId.length > 0;
+}
+
+/** Keeps the UI safe against snapshots from servers without spawn support. */
+function normalizeSpawnState(value: unknown): SpawnState {
+	if (!value || typeof value !== "object") return EMPTY_SPAWN_STATE;
+	const record = value as { enabled?: unknown; spawns?: unknown; defaultCwd?: unknown };
+	const spawns = Array.isArray(record.spawns) ? record.spawns.filter(isSpawnRecord) : [];
+	return {
+		enabled: record.enabled === true,
+		spawns: sortSpawns(spawns),
+		defaultCwd: typeof record.defaultCwd === "string" ? record.defaultCwd : undefined,
+	};
+}
+
 function parseServerMessage(raw: string): ServerToClientMessage | null {
 	try {
 		const parsed: unknown = JSON.parse(raw);
@@ -48,6 +102,8 @@ function parseServerMessage(raw: string): ServerToClientMessage | null {
 			type === "snapshot" ||
 			type === "event" ||
 			type === "session" ||
+			type === "spawn" ||
+			type === "spawns" ||
 			type === "command" ||
 			type === "hello_ok" ||
 			type === "pong"
@@ -58,6 +114,29 @@ function parseServerMessage(raw: string): ServerToClientMessage | null {
 	} catch {
 		return null;
 	}
+}
+
+function parseStartSessionResponse(payload: unknown, status: number): StartSessionResult {
+	if (!payload || typeof payload !== "object") {
+		return { ok: false, error: status >= 400 ? `Request failed (${status})` : "Empty response from server" };
+	}
+	const record = payload as { ok?: unknown; error?: unknown; spawn?: unknown };
+	if (record.ok !== true) {
+		const message = typeof record.error === "string" && record.error ? record.error : `Request failed (${status})`;
+		return { ok: false, error: message };
+	}
+	return isSpawnRecord(record.spawn) ? { ok: true, spawn: record.spawn } : { ok: true };
+}
+
+function parseStopSpawnResponse(payload: unknown, status: number): StopSpawnResult {
+	if (!payload || typeof payload !== "object") {
+		const failed = status >= 400;
+		return failed ? { ok: false, error: `Request failed (${status})` } : { ok: true };
+	}
+	const record = payload as { ok?: unknown; error?: unknown };
+	if (record.ok === true) return { ok: true };
+	const message = typeof record.error === "string" && record.error ? record.error : `Request failed (${status})`;
+	return { ok: false, error: message };
 }
 
 function parsePromptResponse(payload: unknown, status: number): PromptResponse {
@@ -73,9 +152,10 @@ function parsePromptResponse(payload: unknown, status: number): PromptResponse {
 	return delivered ? { ok: true, delivered } : { ok: true };
 }
 
-export function useWebSocket(): WabappConnection {
+export function useWebSocket(): WebappConnection {
 	const [status, setStatus] = useState<"connecting" | "open" | "closed">("connecting");
 	const [state, setState] = useState<ServerState | null>(null);
+	const [spawnState, setSpawnState] = useState<SpawnState>(EMPTY_SPAWN_STATE);
 	const [error, setError] = useState<string | null>(null);
 	const seenIds = useRef<Set<string>>(new Set());
 
@@ -85,13 +165,14 @@ export function useWebSocket(): WabappConnection {
 		const events = (Array.isArray(next.events) ? next.events : []).slice(-EVENT_HISTORY_LIMIT);
 		seenIds.current = new Set(events.map((event) => event.id));
 		setState({ ...next, sessions, events });
+		setSpawnState(normalizeSpawnState((next as { spawn?: unknown }).spawn));
 	}, []);
 
-	const appendEvent = useCallback((event: WabappEvent | null | undefined) => {
+	const appendEvent = useCallback((event: WebappEvent | null | undefined) => {
 		if (!event || typeof event.id !== "string" || event.id.length === 0) return;
 		if (seenIds.current.has(event.id)) return;
 		seenIds.current.add(event.id);
-		const normalized: WabappEvent = {
+		const normalized: WebappEvent = {
 			...event,
 			data: event.data && typeof event.data === "object" ? event.data : {},
 		};
@@ -124,6 +205,18 @@ export function useWebSocket(): WabappConnection {
 					subagents: sessions.filter((item) => item.isSubagent).length,
 				},
 			};
+		});
+	}, []);
+
+	const upsertSpawn = useCallback((spawn: SpawnRecord | null | undefined) => {
+		if (!isSpawnRecord(spawn)) return;
+		const record = spawn;
+		setSpawnState((previous) => {
+			const exists = previous.spawns.some((item) => item.spawnId === record.spawnId);
+			const spawns = exists
+				? previous.spawns.map((item) => (item.spawnId === record.spawnId ? { ...item, ...record } : item))
+				: [...previous.spawns, record];
+			return { ...previous, spawns: sortSpawns(spawns) };
 		});
 	}, []);
 
@@ -188,6 +281,8 @@ export function useWebSocket(): WabappConnection {
 				if (message.type === "snapshot") replaceState(message.state);
 				else if (message.type === "event") appendEvent(message.event);
 				else if (message.type === "session") upsertSession(message.session);
+				else if (message.type === "spawn") upsertSpawn(message.spawn);
+				else if (message.type === "spawns") setSpawnState(normalizeSpawnState(message.state));
 			};
 			nextSocket.onerror = () => {
 				if (disposed) return;
@@ -239,7 +334,7 @@ export function useWebSocket(): WabappConnection {
 				socket = null;
 			}
 		};
-	}, [appendEvent, refreshState, replaceState, upsertSession]);
+	}, [appendEvent, refreshState, replaceState, upsertSession, upsertSpawn]);
 
 	const sendPrompt = useCallback(
 		async (sessionId: string, text: string, deliverAs: DeliverAs): Promise<PromptResponse> => {
@@ -263,6 +358,55 @@ export function useWebSocket(): WabappConnection {
 		[],
 	);
 
+	const startSession = useCallback(
+		async (input: SpawnInput): Promise<StartSessionResult> => {
+			const body: Record<string, string> = { cwd: input.cwd };
+			const prompt = input.prompt?.trim();
+			const model = input.model?.trim();
+			const agentName = input.agentName?.trim();
+			if (prompt) body.prompt = prompt;
+			if (model) body.model = model;
+			if (agentName) body.agentName = agentName;
+			try {
+				const response = await fetch("/api/spawn", {
+					method: "POST",
+					headers: { "content-type": "application/json", accept: "application/json" },
+					body: JSON.stringify(body),
+				});
+				let payload: unknown = null;
+				try {
+					payload = await response.json();
+				} catch {
+					payload = null;
+				}
+				const result = parseStartSessionResponse(payload, response.status);
+				if (result.ok && result.spawn) upsertSpawn(result.spawn);
+				return result;
+			} catch (err) {
+				return { ok: false, error: errorMessage(err) };
+			}
+		},
+		[upsertSpawn],
+	);
+
+	const stopSpawn = useCallback(async (spawnId: string): Promise<StopSpawnResult> => {
+		try {
+			const response = await fetch(`/api/spawn/${encodeURIComponent(spawnId)}`, {
+				method: "DELETE",
+				headers: { accept: "application/json" },
+			});
+			let payload: unknown = null;
+			try {
+				payload = await response.json();
+			} catch {
+				payload = null;
+			}
+			return parseStopSpawnResponse(payload, response.status);
+		} catch (err) {
+			return { ok: false, error: errorMessage(err) };
+		}
+	}, []);
+
 	const rescanLeech = useCallback(async (): Promise<void> => {
 		try {
 			const response = await fetch("/api/leech/scan", {
@@ -282,8 +426,13 @@ export function useWebSocket(): WabappConnection {
 		state,
 		events: state?.events ?? EMPTY_EVENTS,
 		sessions: state?.sessions ?? EMPTY_SESSIONS,
+		spawns: spawnState.spawns,
+		spawnEnabled: spawnState.enabled,
+		defaultCwd: spawnState.defaultCwd ?? "",
 		error,
 		sendPrompt,
 		rescanLeech,
+		startSession,
+		stopSpawn,
 	};
 }

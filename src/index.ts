@@ -1,5 +1,6 @@
 import { open } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { createBridge } from "./bridge.js";
 import type { BridgeRuntime } from "./bridge.js";
@@ -14,10 +15,13 @@ import {
 	truncate,
 	type LeechStatus,
 	type PromptCommand,
-	type WabappEvent,
+	type WebappEvent,
 } from "./protocol.js";
 import { createCapturePlaywrightTool, createPostWorkStateTool } from "./tools.js";
 import type { ToolRuntime } from "./tools.js";
+
+/** Repository/package root; used to describe the extension and to spawn siblings. */
+const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 interface SessionState {
 	sessionId: string;
@@ -191,7 +195,7 @@ async function resolveParentSessionId(parentSession: string | undefined): Promis
 	return fallback || undefined;
 }
 
-export default function piWabapp(pi: ExtensionAPI): void {
+export default function piWebapp(pi: ExtensionAPI): void {
 	const instanceId = `${process.pid}-${newId("pi")}`;
 	let bridge: BridgeRuntime | null = null;
 	let bridgePromise: Promise<BridgeRuntime | null> | null = null;
@@ -210,7 +214,7 @@ export default function piWabapp(pi: ExtensionAPI): void {
 		}
 	}
 
-	function emit(event: WabappEvent): void {
+	function emit(event: WebappEvent): void {
 		const current = bridge;
 		if (!current) return;
 		try {
@@ -221,9 +225,9 @@ export default function piWabapp(pi: ExtensionAPI): void {
 	}
 
 	function currentEvent(
-		type: WabappEvent["type"],
-		data: WabappEvent["data"],
-	): WabappEvent | null {
+		type: WebappEvent["type"],
+		data: WebappEvent["data"],
+	): WebappEvent | null {
 		const active = session;
 		if (!active) return null;
 		return makeEvent({
@@ -260,7 +264,12 @@ export default function piWabapp(pi: ExtensionAPI): void {
 				try {
 					const host = process.env[ENV.host] || DEFAULT_HOST;
 					const port = Number(process.env[ENV.port]) || DEFAULT_PORT;
-					const created = await createBridge({ instanceId, host, port });
+					const created = await createBridge({
+						instanceId,
+						host,
+						port,
+						spawn: { rootDir: PACKAGE_ROOT },
+					});
 					created.setPromptHandler(deliverPrompt);
 					bridge = created;
 					return created;
@@ -269,7 +278,7 @@ export default function piWabapp(pi: ExtensionAPI): void {
 					if (!bridgeErrorNotified) {
 						bridgeErrorNotified = true;
 						const message = error instanceof Error ? error.message : String(error);
-						notify(`pi-wabapp: could not start the dashboard bridge: ${message}`, "error");
+						notify(`pi-webapp: could not start the dashboard bridge: ${message}`, "error");
 					}
 					return null;
 				}
@@ -288,7 +297,7 @@ export default function piWabapp(pi: ExtensionAPI): void {
 
 	function getToolRuntime(): ToolRuntime {
 		const active = session;
-		if (!active) throw new Error("pi-wabapp: no active pi session.");
+		if (!active) throw new Error("pi-webapp: no active pi session.");
 		return {
 			sessionId: active.sessionId,
 			parentSessionId: active.parentSessionId,
@@ -303,14 +312,14 @@ export default function piWabapp(pi: ExtensionAPI): void {
 	pi.registerTool(createPostWorkStateTool(getToolRuntime));
 	pi.registerTool(createCapturePlaywrightTool(getToolRuntime));
 
-	pi.registerCommand("wabapp", {
-		description: "Show the pi-wabapp dashboard URL, mode and leech status",
+	pi.registerCommand("webapp", {
+		description: "Show the pi-webapp dashboard URL, mode and leech status",
 		handler: async (_args, ctx) => {
 			ctxRef = ctx;
 			await ensureBridge();
 			const activeBridge = bridge;
 			if (!activeBridge) {
-				notify("pi-wabapp: the dashboard bridge is not available.", "error");
+				notify("pi-webapp: the dashboard bridge is not available.", "error");
 				return;
 			}
 
@@ -323,7 +332,7 @@ export default function piWabapp(pi: ExtensionAPI): void {
 			}
 
 			const lines = [
-				"pi-wabapp dashboard",
+				"pi-webapp dashboard",
 				`URL: ${activeBridge.url}`,
 				`Mode: ${activeBridge.mode}`,
 			];
@@ -383,6 +392,7 @@ export default function piWabapp(pi: ExtensionAPI): void {
 						parentSessionId,
 						agentName,
 						isSubagent: Boolean(parentSessionId),
+						spawnId: process.env[ENV.spawnId]?.trim() || undefined,
 					},
 				}),
 			);

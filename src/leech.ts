@@ -1,6 +1,6 @@
 /**
  * Session leech: tail pi session JSONL files on disk and turn newly appended
- * entries into WabappEvents. This lets the dashboard observe pi processes that
+ * entries into WebappEvents. This lets the dashboard observe pi processes that
  * do not load the extension (and therefore never report live events).
  *
  * Live in-process events remain authoritative in the server; leeched events are
@@ -13,9 +13,9 @@ import { basename, join, resolve } from "node:path";
 import { clearInterval, setInterval } from "node:timers";
 import {
 	type LeechStatus,
-	type WabappEvent,
-	type WabappEventData,
-	type WabappEventType,
+	type WebappEvent,
+	type WebappEventData,
+	type WebappEventType,
 	bool,
 	makeEvent,
 	num,
@@ -46,7 +46,7 @@ export interface SessionLeechOptions {
 	maxAgeMs?: number;
 	replayLimit?: number;
 	ignoreSession?: (id: string) => boolean;
-	onEvent: (event: WabappEvent) => void;
+	onEvent: (event: WebappEvent) => void;
 }
 
 interface HeaderInfo {
@@ -71,7 +71,7 @@ interface FileState {
 	emittedStart: boolean;
 	/** True while the first-sight replay buffer is still being collected. */
 	replaying: boolean;
-	replayBuffer: WabappEvent[];
+	replayBuffer: WebappEvent[];
 	model: string;
 	parentSessionPath?: string;
 	parentSessionId?: string;
@@ -228,7 +228,7 @@ export class SessionLeech {
 	private readonly maxAgeMs: number;
 	private readonly replayLimit: number;
 	private readonly ignoreSession?: (id: string) => boolean;
-	private readonly onEvent: (event: WabappEvent) => void;
+	private readonly onEvent: (event: WebappEvent) => void;
 
 	private readonly files = new Map<string, FileState>();
 	private readonly sessionIds = new Set<string>();
@@ -605,10 +605,10 @@ export class SessionLeech {
 
 	private makeEvent(
 		state: FileState,
-		type: WabappEventType,
+		type: WebappEventType,
 		timestamp: number,
-		data: WabappEventData,
-	): WabappEvent {
+		data: WebappEventData,
+	): WebappEvent {
 		return makeEvent({
 			type,
 			sessionId: state.sessionId,
@@ -620,7 +620,7 @@ export class SessionLeech {
 		});
 	}
 
-	private deliver(state: FileState, event: WabappEvent): void {
+	private deliver(state: FileState, event: WebappEvent): void {
 		if (!state.replaying) {
 			this.safeEmit(event);
 			return;
@@ -640,7 +640,7 @@ export class SessionLeech {
 
 	private emitSessionStarted(state: FileState): void {
 		const timestamp = parseTimestamp(state.header.timestamp, state.mtimeMs);
-		const data: WabappEventData = {
+		const data: WebappEventData = {
 			cwd: state.header.cwd,
 			title: sessionTitle(state.header.cwd, state.sessionId),
 			model: state.model,
@@ -661,7 +661,7 @@ export class SessionLeech {
 		state.emittedStart = true;
 	}
 
-	private safeEmit(event: WabappEvent): void {
+	private safeEmit(event: WebappEvent): void {
 		try {
 			this.onEvent(event);
 		} catch (error) {

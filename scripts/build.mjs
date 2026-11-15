@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Build pipeline for pi-wabapp.
+ * Build pipeline for pi-webapp.
  *
  *  1. src/  -> dist/      (tsc, ESM, source maps)
  *  2. web/  -> dist/web/  (Tailwind + daisyUI CSS, esbuild JS bundle, index.html)

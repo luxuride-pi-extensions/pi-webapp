@@ -1,8 +1,8 @@
 import { WebSocket } from "ws";
 import type { RawData } from "ws";
-import type { ClientToServerMessage, PromptCommand, WabappEvent } from "./protocol.js";
+import type { ClientToServerMessage, PromptCommand, WebappEvent } from "./protocol.js";
 
-export interface WabappClientOptions {
+export interface WebappClientOptions {
 	baseUrl: string;
 	instanceId: string;
 	onCommand: (command: PromptCommand) => Promise<{ ok: boolean; error?: string }>;
@@ -23,10 +23,10 @@ type ClientMessage = ClientToServerMessage | { type: "pong" };
  * process. Commands arrive over the WebSocket; events leave over HTTP so they
  * survive short WebSocket interruptions.
  */
-export class WabappClient {
+export class WebappClient {
 	private readonly baseUrl: string;
 	private readonly instanceId: string;
-	private readonly options: WabappClientOptions;
+	private readonly options: WebappClientOptions;
 	private ws: WebSocket | null = null;
 	private started = false;
 	private closed = false;
@@ -35,9 +35,9 @@ export class WabappClient {
 	private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 	private flushPromise: Promise<void> | null = null;
 	private commandChain: Promise<void> = Promise.resolve();
-	private readonly queue: WabappEvent[] = [];
+	private readonly queue: WebappEvent[] = [];
 
-	constructor(options: WabappClientOptions) {
+	constructor(options: WebappClientOptions) {
 		this.options = options;
 		this.baseUrl = options.baseUrl.replace(/\/+$/, "");
 		this.instanceId = options.instanceId;
@@ -97,7 +97,7 @@ export class WabappClient {
 		});
 	}
 
-	emit(event: WabappEvent): void {
+	emit(event: WebappEvent): void {
 		this.queue.push(event);
 		if (this.queue.length > EVENT_BUFFER_LIMIT) {
 			this.queue.splice(0, this.queue.length - EVENT_BUFFER_LIMIT);
@@ -212,7 +212,7 @@ export class WabappClient {
 		}
 	}
 
-	private async postEvent(event: WabappEvent): Promise<boolean> {
+	private async postEvent(event: WebappEvent): Promise<boolean> {
 		try {
 			const response = await fetch(`${this.baseUrl}/api/events`, {
 				method: "POST",
@@ -265,7 +265,7 @@ export class WabappClient {
 			url.searchParams.set("instanceId", this.instanceId);
 			return url.toString();
 		} catch {
-			// A malformed PI_WABAPP_HOST/port must not crash pi; retrying is harmless.
+			// A malformed PI_WEBAPP_HOST/port must not crash pi; retrying is harmless.
 			return "";
 		}
 	}

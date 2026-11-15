@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 /**
- * End-to-end smoke test for pi-wabapp.
+ * End-to-end smoke test for pi-webapp.
  *
- * Boots a real WabappServer on an ephemeral loopback port and walks the public
+ * Boots a real WebappServer on an ephemeral loopback port and walks the public
  * wire contract: static dashboard assets, event ingestion, WebSocket snapshot /
  * broadcast, HTTP Range video streaming, prompt routing (local, instance and
- * leech), multi-instance routing and leech tailing of pi session files.
+ * leech), multi-instance routing, leech tailing of pi session files and the
+ * dashboard spawn lifecycle.
  *
  * The test imports the compiled server (`dist/server.js`, `dist/storage.js`),
  * so it needs a build first: `npm run build`.
@@ -30,12 +31,12 @@ const distDir = path.join(repoRoot, "dist");
 const requiredDist = ["server.js", "storage.js", "protocol.js"];
 const missingDist = requiredDist.filter((file) => !existsSync(path.join(distDir, file)));
 if (missingDist.length > 0) {
-	console.error(`pi-wabapp smoke test: dist/ is missing ${missingDist.join(", ")}.`);
+	console.error(`pi-webapp smoke test: dist/ is missing ${missingDist.join(", ")}.`);
 	console.error('Run "npm run build" first.');
 	process.exit(1);
 }
 
-const { WabappServer } = await import(pathToFileURL(path.join(distDir, "server.js")).href);
+const { WebappServer } = await import(pathToFileURL(path.join(distDir, "server.js")).href);
 const { ingestArtifact } = await import(pathToFileURL(path.join(distDir, "storage.js")).href);
 
 // A 1x1 transparent PNG, used as a real artifact upload payload.
@@ -195,14 +196,14 @@ const watchdog = setTimeout(() => {
 
 try {
 	step("prepare temp dirs");
-	tmpRoot = await mkdtemp(path.join(os.tmpdir(), "pi-wabapp-smoke-"));
+	tmpRoot = await mkdtemp(path.join(os.tmpdir(), "pi-webapp-smoke-"));
 	artifactsRoot = path.join(tmpRoot, "artifacts");
 	leechDir = path.join(tmpRoot, "leech");
 	await mkdir(artifactsRoot, { recursive: true });
 	await mkdir(leechDir, { recursive: true });
 
 	step("1. start server");
-	server = new WabappServer({
+	server = new WebappServer({
 		host: "127.0.0.1",
 		port: 0,
 		artifactsRoot,
@@ -495,13 +496,134 @@ try {
 	assert.equal(scanResponse.status, 200, "POST /api/leech/scan");
 	const scanBody = await scanResponse.json();
 	assert.equal(scanBody.enabled, true, "leech scan response must report enabled: true");
+
+	step("9. spawn API");
+	const spawnCwd = path.join(tmpRoot, "spawn-cwd");
+	await mkdir(spawnCwd, { recursive: true });
+	const spawnSessionId = "spawned-session-1";
+	const spawnRecords = new Map();
+	const fakeSpawner = {
+		available: true,
+		enabled: true,
+		piBin: "pi",
+		defaultWorkingDir: process.cwd(),
+		spawn: async (request) => {
+			const record = {
+				spawnId: "spawn_test",
+				cwd: request.cwd,
+				status: "running",
+				startedAt: Date.now(),
+				...(request.prompt ? { prompt: request.prompt } : {}),
+			};
+			spawnRecords.set(record.spawnId, record);
+			return { ...record };
+		},
+		stop: (spawnId) => {
+			const record = spawnRecords.get(spawnId);
+			if (!record || record.status !== "running") return false;
+			record.status = "exited";
+			return true;
+		},
+		list: () => Array.from(spawnRecords.values(), (record) => ({ ...record })),
+		get: (spawnId) => {
+			const record = spawnRecords.get(spawnId);
+			return record ? { ...record } : null;
+		},
+		attachSession: (spawnId, sessionId) => {
+			const record = spawnRecords.get(spawnId);
+			if (record) record.sessionId = sessionId;
+		},
+		logTail: () => "fake log",
+		stopAll: () => {},
+	};
+	server.setSessionSpawner(fakeSpawner);
+
+	const emptySpawnResponse = await fetch(`${baseUrl}/api/spawn`);
+	assert.equal(emptySpawnResponse.status, 200, "GET /api/spawn");
+	const emptySpawnState = await emptySpawnResponse.json();
+	assert.equal(emptySpawnState.enabled, true, "GET /api/spawn must report a live spawner as enabled");
+	assert.equal(emptySpawnState.defaultCwd, process.cwd(), "spawn state must carry the default working dir");
+	assert.deepEqual(emptySpawnState.spawns, [], "spawn state must start with no spawns");
+
+	const spawnResponse = await fetch(`${baseUrl}/api/spawn`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ cwd: spawnCwd, prompt: "hello from the smoke test" }),
+	});
+	const spawnBodyText = await spawnResponse.text();
+	assert.equal(spawnResponse.status, 201, `POST /api/spawn -> ${spawnResponse.status}: ${spawnBodyText}`);
+	const spawnBody = JSON.parse(spawnBodyText);
+	assert.equal(spawnBody.ok, true, "POST /api/spawn must report ok: true");
+	assert.equal(spawnBody.spawn.spawnId, "spawn_test", "POST /api/spawn must return the spawn record");
+	assert.equal(spawnBody.spawn.cwd, spawnCwd, "spawn record must keep the requested cwd");
+	assert.equal(spawnBody.spawn.status, "running", "spawn record must carry its status");
+	assert.equal(spawnBody.spawn.prompt, "hello from the smoke test", "spawn record must keep the initial prompt");
+
+	const relativeCwdResponse = await fetch(`${baseUrl}/api/spawn`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ cwd: "relative/dir" }),
+	});
+	assert.equal(relativeCwdResponse.status, 400, "POST /api/spawn with a relative cwd must answer 400");
+
+	const missingCwdResponse = await fetch(`${baseUrl}/api/spawn`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ cwd: path.join(tmpRoot, "does-not-exist") }),
+	});
+	assert.equal(missingCwdResponse.status, 400, "POST /api/spawn with a missing cwd must answer 400");
+
+	await postEvent(
+		"local-1",
+		makeEvent("session_started", spawnSessionId, {
+			data: { cwd: spawnCwd, title: "Spawned session", spawnId: "spawn_test" },
+		}),
+	);
+	const spawnedNode = (await getState()).sessions.find((node) => node.id === spawnSessionId);
+	assert.ok(spawnedNode, `missing spawned session ${spawnSessionId}`);
+	assert.equal(spawnedNode.spawnId, "spawn_test", "session_started data.spawnId must land on the SessionNode");
+
+	const listedSpawns = await (await fetch(`${baseUrl}/api/spawn`)).json();
+	assert.equal(listedSpawns.spawns.length, 1, "GET /api/spawn must list the started session");
+	assert.equal(listedSpawns.spawns[0].spawnId, "spawn_test");
+	assert.equal(
+		listedSpawns.spawns[0].sessionId,
+		spawnSessionId,
+		"the spawn record must attach the session id reported by the child",
+	);
+
+	const spawnLogResponse = await fetch(`${baseUrl}/api/spawn/spawn_test/log`);
+	assert.equal(spawnLogResponse.status, 200, "GET /api/spawn/:id/log");
+	assert.match(spawnLogResponse.headers.get("content-type") ?? "", /text\/plain/i);
+	assert.equal(await spawnLogResponse.text(), "fake log", "spawn log must return the spawner's tail");
+
+	const stopSpawnResponse = await fetch(`${baseUrl}/api/spawn/spawn_test`, { method: "DELETE" });
+	assert.equal(stopSpawnResponse.status, 200, "DELETE /api/spawn/:id");
+	assert.equal((await stopSpawnResponse.json()).ok, true);
+
+	const stopSpawnAgain = await fetch(`${baseUrl}/api/spawn/spawn_test`, { method: "DELETE" });
+	assert.equal(stopSpawnAgain.status, 409, "DELETE /api/spawn/:id on a stopped spawn must answer 409");
+
+	const unknownSpawnResponse = await fetch(`${baseUrl}/api/spawn/spawn_unknown`, { method: "DELETE" });
+	assert.equal(unknownSpawnResponse.status, 404, "DELETE /api/spawn/:id for an unknown id must answer 404");
+
+	server.setSessionSpawner(null);
+	const disabledSpawnState = await (await fetch(`${baseUrl}/api/spawn`)).json();
+	assert.equal(disabledSpawnState.enabled, false, "GET /api/spawn without a spawner must report enabled: false");
+	assert.deepEqual(disabledSpawnState.spawns, [], "GET /api/spawn without a spawner must list no spawns");
+	const disabledSpawnResponse = await fetch(`${baseUrl}/api/spawn`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ cwd: spawnCwd }),
+	});
+	assert.equal(disabledSpawnResponse.status, 403, "POST /api/spawn without a spawner must answer 403");
 } catch (error) {
 	exitCode = 1;
 	console.error(`\n✗ SMOKE FAILED at step "${currentStep}":`);
 	console.error(error?.stack ?? String(error));
 } finally {
 	clearTimeout(watchdog);
-	step("9. cleanup");
+	step("10. cleanup");
 	try {
 		await cleanup();
 	} catch (error) {
@@ -537,7 +659,7 @@ async function cleanup() {
 	}
 	if (serverPort > 0) {
 		try {
-			const probe = new WabappServer({ host: "127.0.0.1", port: serverPort, artifactsRoot, leech: false });
+			const probe = new WebappServer({ host: "127.0.0.1", port: serverPort, artifactsRoot, leech: false });
 			const probePort = await probe.start();
 			assert.equal(probePort, serverPort, "second server must bind the released port");
 			await probe.stop();

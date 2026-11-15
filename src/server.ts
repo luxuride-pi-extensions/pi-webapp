@@ -32,11 +32,16 @@ import {
 	type ServerToClientMessage,
 	type SessionNode,
 	type SessionSource,
+	type SessionSpawnerLike,
 	type SessionStatus,
-	type WabappEvent,
-	type WabappEventType,
+	type SpawnRecord,
+	type SpawnRequest,
+	type SpawnState,
+	type WebappEvent,
+	type WebappEventType,
 } from "./protocol.js";
 import { SessionLeech } from "./leech.js";
+import { parseSpawnRequest } from "./spawn.js";
 import { getCacheRoot, mimeForFile } from "./storage.js";
 
 const MAX_API_BODY_BYTES = 2 * 1024 * 1024;
@@ -59,7 +64,7 @@ const PACKAGE_ROOT = path.resolve(HERE, "..");
 const DEFAULT_WEB_ROOT = path.join(PACKAGE_ROOT, "dist", "web");
 
 const STATIC_ASSETS = new Set(["/app.js", "/app.css", "/favicon.svg", "/favicon.ico"]);
-const EVENT_TYPES: ReadonlySet<string> = new Set<WabappEventType>([
+const EVENT_TYPES: ReadonlySet<string> = new Set<WebappEventType>([
 	"session_started",
 	"session_ended",
 	"session_meta",
@@ -75,7 +80,7 @@ const EVENT_TYPES: ReadonlySet<string> = new Set<WabappEventType>([
 	"error",
 ]);
 
-export interface WabappServerOptions {
+export interface WebappServerOptions {
 	host?: string;
 	port?: number;
 	webRoot?: string;
@@ -120,12 +125,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function isWabappEventType(value: unknown): value is WabappEventType {
+function isWebappEventType(value: unknown): value is WebappEventType {
 	return typeof value === "string" && EVENT_TYPES.has(value);
 }
 
-function isWabappEventLike(value: unknown): value is WabappEvent {
-	return isRecord(value) && isWabappEventType(value.type) && typeof value.sessionId === "string";
+function isWebappEventLike(value: unknown): value is WebappEvent {
+	return isRecord(value) && isWebappEventType(value.type) && typeof value.sessionId === "string";
 }
 
 function shortSessionId(id: string): string {
@@ -290,7 +295,7 @@ function parseRange(header: string | undefined, size: number): ByteRange | "unsa
 	return { start, end };
 }
 
-export class WabappServer {
+export class WebappServer {
 	readonly host: string;
 	readonly artifactsRoot: string;
 	readonly webRoot: string;
@@ -304,6 +309,9 @@ export class WabappServer {
 	private readonly leechDirs: string[];
 	private leechError: string | null = null;
 	private localPromptHandler: LocalPromptHandler | null = null;
+	private spawner: SessionSpawnerLike | null = null;
+	private readonly initialPrompts = new Map<string, string>();
+	private readonly pendingSessionCommands = new Map<string, PromptCommand[]>();
 
 	private started = false;
 	private startedAt = 0;
@@ -312,7 +320,7 @@ export class WabappServer {
 	private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
 	private readonly sessions = new Map<string, SessionNode>();
-	private readonly events: WabappEvent[] = [];
+	private readonly events: WebappEvent[] = [];
 	private readonly owners = new Map<string, string>();
 	private readonly instanceSessions = new Map<string, Set<string>>();
 	private readonly commandQueues = new Map<string, PromptCommand[]>();
@@ -320,7 +328,7 @@ export class WabappServer {
 	private readonly instanceClients = new Map<string, ClientState>();
 	private readonly disconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
-	constructor(options: WabappServerOptions = {}) {
+	constructor(options: WebappServerOptions = {}) {
 		this.host = options.host?.trim() || DEFAULT_HOST;
 		const requestedPort = options.port ?? DEFAULT_PORT;
 		this.configuredPort =
@@ -516,8 +524,8 @@ export class WabappServer {
 		this.listeningPort = 0;
 	}
 
-	ingest(event: WabappEvent, instanceId?: string): void {
-		if (!isWabappEventLike(event)) return;
+	ingest(event: WebappEvent, instanceId?: string): void {
+		if (!isWebappEventLike(event)) return;
 		const sessionId = event.sessionId.trim();
 		if (!sessionId) return;
 
@@ -525,7 +533,7 @@ export class WabappServer {
 		const existing = this.sessions.get(sessionId);
 		if (source === "leech" && existing?.source === "live") return;
 
-		const normalized: WabappEvent = {
+		const normalized: WebappEvent = {
 			id: str(event.id) || newId("evt"),
 			type: event.type,
 			sessionId,
@@ -551,6 +559,29 @@ export class WabappServer {
 		const primary = this.sessions.get(normalized.sessionId);
 		if (primary) primary.lastEventType = normalized.type;
 
+		if (normalized.type === "session_started" && this.spawner) {
+			const spawnId = str(normalized.data.spawnId);
+			if (spawnId) {
+				const spawn = this.spawner.get(spawnId);
+				if (spawn) {
+					this.spawner.attachSession(spawnId, normalized.sessionId);
+					if (primary) primary.spawnId = spawnId;
+					this.notifySpawnChange({ ...spawn });
+					const prompt = this.initialPrompts.get(spawnId);
+					if (prompt) {
+						this.initialPrompts.delete(spawnId);
+						this.deliverCommand({
+							id: newId("cmd"),
+							sessionId: normalized.sessionId,
+							text: prompt,
+							deliverAs: "auto",
+							createdAt: Date.now(),
+						});
+					}
+				}
+			}
+		}
+
 		this.events.push(normalized);
 		if (this.events.length > EVENT_HISTORY_LIMIT) {
 			this.events.splice(0, this.events.length - EVENT_HISTORY_LIMIT);
@@ -565,6 +596,30 @@ export class WabappServer {
 
 	setLocalPromptHandler(handler: LocalPromptHandler | null): void {
 		this.localPromptHandler = handler;
+	}
+
+	/** Installs the dashboard's process launcher (primary instances only). */
+	setSessionSpawner(spawner: SessionSpawnerLike | null): void {
+		this.spawner = spawner;
+	}
+
+	getSpawnState(): SpawnState {
+		if (!this.spawner) return { enabled: false, spawns: [] };
+		return {
+			enabled: this.spawner.enabled,
+			spawns: this.spawner.list(),
+			defaultCwd: this.spawner.defaultWorkingDir,
+		};
+	}
+
+	/** Broadcasts spawn state to every connected browser. */
+	notifySpawnChange(record?: SpawnRecord): void {
+		const state = this.getSpawnState();
+		if (record) {
+			const fresh = state.spawns.find((item) => item.spawnId === record.spawnId) ?? record;
+			this.broadcast({ type: "spawn", spawn: { ...fresh } });
+		}
+		this.broadcast({ type: "spawns", state });
 	}
 
 	getState(): ServerState {
@@ -597,6 +652,7 @@ export class WabappServer {
 			events,
 			counts: { sessions: topLevel, subagents, events: events.length },
 			leech: this.getLeechStatus(),
+			spawn: this.getSpawnState(),
 			serverTime: now,
 		};
 	}
@@ -686,7 +742,7 @@ export class WabappServer {
 		return stub;
 	}
 
-	private applyEvent(event: WabappEvent): Set<string> {
+	private applyEvent(event: WebappEvent): Set<string> {
 		const touched = new Set<string>();
 		const data = event.data;
 		const timestamp = event.timestamp;
@@ -858,6 +914,26 @@ export class WabappServer {
 			this.instanceSessions.set(owner, owned);
 		}
 		owned.add(id);
+		const pending = this.pendingSessionCommands.get(id);
+		if (pending && pending.length > 0) {
+			this.pendingSessionCommands.delete(id);
+			for (const command of pending) {
+				command.instanceId = owner;
+				this.enqueueCommand(owner, command);
+			}
+		}
+	}
+
+	private deliverCommand(command: PromptCommand): void {
+		const owner = this.owners.get(command.sessionId);
+		if (owner) {
+			command.instanceId = owner;
+			this.enqueueCommand(owner, command);
+			return;
+		}
+		const pending = this.pendingSessionCommands.get(command.sessionId) ?? [];
+		pending.push(command);
+		this.pendingSessionCommands.set(command.sessionId, pending);
 	}
 
 	private enqueueCommand(instanceId: string, command: PromptCommand): void {
@@ -1148,6 +1224,22 @@ export class WabappServer {
 				await this.handlePromptPost(req, res, promptMatch[1]);
 				return;
 			}
+			if (pathname === "/api/spawn") {
+				if (method === "GET") {
+					sendJson(res, 200, this.getSpawnState());
+					return;
+				}
+				if (method === "POST") {
+					await this.handleSpawnPost(req, res);
+					return;
+				}
+				return sendMethodNotAllowed(res, "GET, POST");
+			}
+			const spawnMatch = /^\/api\/spawn\/([^/]+)(\/log)?$/.exec(pathname);
+			if (spawnMatch) {
+				await this.handleSpawnItem(res, method, spawnMatch[1], Boolean(spawnMatch[2]));
+				return;
+			}
 			if (pathname === "/api/leech") {
 				if (method !== "GET") return sendMethodNotAllowed(res, "GET");
 				sendJson(res, 200, this.getLeechStatus());
@@ -1194,25 +1286,86 @@ export class WabappServer {
 		}
 
 		let accepted = false;
-		if (isWabappEventLike(payload)) {
+		if (isWebappEventLike(payload)) {
 			this.ingest(payload);
 			accepted = true;
 		} else if (isRecord(payload)) {
 			const instanceId = str(payload.instanceId).trim() || undefined;
-			if (isWabappEventLike(payload.event)) {
+			if (isWebappEventLike(payload.event)) {
 				this.ingest(payload.event, instanceId);
 				accepted = true;
 			}
 			if (Array.isArray(payload.events)) {
 				for (const event of payload.events) {
-					if (!isWabappEventLike(event)) continue;
+					if (!isWebappEventLike(event)) continue;
 					this.ingest(event, instanceId);
 					accepted = true;
 				}
 			}
 		}
 
-		if (!accepted) throw new HttpError(400, "no Wabapp events in request body");
+		if (!accepted) throw new HttpError(400, "no Webapp events in request body");
+		sendJson(res, 200, { ok: true });
+	}
+
+	private async handleSpawnPost(req: IncomingMessage, res: ServerResponse): Promise<void> {
+		if (!this.spawner || !this.spawner.enabled) {
+			throw new HttpError(
+				403,
+				"spawning is disabled on this instance (only the primary dashboard on a loopback address can start pi sessions)",
+			);
+		}
+		const payload = await readJsonBody(req, MAX_API_BODY_BYTES);
+		let request: SpawnRequest;
+		try {
+			request = parseSpawnRequest(payload, this.spawner.defaultWorkingDir);
+		} catch (error) {
+			const status = isRecord(error) && typeof error.status === "number" ? error.status : 400;
+			throw new HttpError(status, errorMessage(error));
+		}
+		let record: SpawnRecord;
+		try {
+			record = await this.spawner.spawn(request);
+		} catch (error) {
+			const status = isRecord(error) && typeof error.status === "number" ? error.status : 500;
+			throw new HttpError(status, errorMessage(error));
+		}
+		if (request.prompt) {
+			// The child registers itself as an instance; steers arrive over WS.
+			this.initialPrompts.set(record.spawnId, request.prompt);
+		}
+		this.notifySpawnChange(record);
+		sendJson(res, 201, { ok: true, spawn: record });
+	}
+
+	private async handleSpawnItem(
+		res: ServerResponse,
+		method: string,
+		encodedSpawnId: string,
+		wantLog: boolean,
+	): Promise<void> {
+		let spawnId: string;
+		try {
+			spawnId = decodeURIComponent(encodedSpawnId);
+		} catch {
+			throw new HttpError(400, "invalid spawn id");
+		}
+		if (wantLog) {
+			if (method !== "GET") return sendMethodNotAllowed(res, "GET");
+			const tail = this.spawner?.logTail(spawnId) ?? null;
+			if (tail === null) throw new HttpError(404, "spawn not found");
+			res.writeHead(200, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
+			res.end(tail);
+			return;
+		}
+		if (method !== "DELETE") return sendMethodNotAllowed(res, "DELETE");
+		if (!this.spawner) throw new HttpError(404, "spawn not found");
+		if (!this.spawner.stop(spawnId)) {
+			const record = this.spawner.get(spawnId);
+			if (!record) throw new HttpError(404, "spawn not found");
+			throw new HttpError(409, `spawn is not running (${record.status})`);
+		}
+		this.notifySpawnChange(this.spawner.get(spawnId) ?? undefined);
 		sendJson(res, 200, { ok: true });
 	}
 
@@ -1268,6 +1421,12 @@ export class WabappServer {
 			});
 			return;
 		}
+		if (session) {
+			// The instance has not claimed the session yet (spawn in flight).
+			this.deliverCommand(command);
+			sendJson(res, 202, { ok: true, delivered: "instance" });
+			return;
+		}
 		sendJson(res, 404, { ok: false, error: "session not found" });
 	}
 
@@ -1292,7 +1451,7 @@ export class WabappServer {
 		}
 
 		if (html === null) {
-			const diagnostic = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>pi-wabapp</title></head><body><main><h1>pi-wabapp</h1><p>pi-wabapp is not built yet. Run: npm run build</p></main></body></html>`;
+			const diagnostic = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>pi-webapp</title></head><body><main><h1>pi-webapp</h1><p>pi-webapp is not built yet. Run: npm run build</p></main></body></html>`;
 			if (method === "HEAD") {
 				applyHtmlHeaders(res);
 				res.writeHead(200, {
