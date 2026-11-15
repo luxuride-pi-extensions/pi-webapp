@@ -50,11 +50,15 @@ Start a session or send it a prompt, then open **http://127.0.0.1:8787** in a br
 The extension only runs while a `pi` process is alive: no `pi`, no dashboard. The same server also ships as a standalone daemon, so the dashboard can be always-on — a systemd service, a tmux session, a machine you leave open — with no agent running. It serves the dashboard, tails session files, accepts `pi` processes as they join, and can start new sessions from the browser.
 
 ```bash
-npx pi-webapp                 # one-off, from npm
-node bin/pi-webapp.mjs        # from a checkout (after npm run build)
-npm install -g pi-webapp      # global install
-pi-webapp serve               # then run it from anywhere
+node bin/pi-webapp.mjs               # from a checkout (dist/ is committed and prebuilt)
+npm install -g /path/to/pi-webapp    # global: links the `pi-webapp` command
+pi-webapp serve                      # then run it from anywhere
+npx pi-webapp                        # once the package is published on npm
 ```
+
+`pi install git:github.com/luxuride-pi-extensions/pi-webapp` also gives you a daemon
+binary at `~/.pi/agent/git/github.com/luxuride-pi-extensions/pi-webapp/bin/pi-webapp.mjs`
+(use that path in the systemd unit below).
 
 `serve` is optional: `pi-webapp` and `pi-webapp serve` are the same command. The daemon prints its URL and then serves until it is asked to stop:
 
@@ -470,7 +474,7 @@ pi-webapp/
 ├── bin/pi-webapp.mjs     standalone `pi-webapp` CLI shim
 ├── tests/smoke.mjs       end-to-end smoke test (server + extension contract)
 ├── tests/daemon.mjs      standalone daemon + spawn lifecycle test
-├── dist/                 build output (generated, git-ignored, shipped in the package)
+├── dist/                 build output (generated, committed, shipped in the package)
 ├── package.json
 ├── tsconfig.json
 └── tsconfig.build.json
@@ -486,11 +490,12 @@ npm test              # smoke test (requires a build)
 node tests/daemon.mjs # standalone daemon test (requires a build)
 ```
 
-`dist/` is generated and git-ignored. `npm pack` and `pi install git:...` run the
-`prepare`/`prepublishOnly` hooks, which rebuild it, so a published or git-installed
-package always ships a working dashboard bundle even though the sources are the
-only thing committed. Re-run `npm run build` after changing `src/` or `web/` before
-testing by hand.
+`dist/` is committed so that `pi install git:...` (which installs with
+`--omit=dev` and may skip lifecycle scripts) always ships a working dashboard
+bundle. `npm run build` regenerates it; the `prepare` hook reuses an existing
+`dist/` unless it is incomplete or you set `PI_WEBAPP_FORCE_BUILD=1`. Re-run
+`npm run build` after changing `src/` or `web/`, and commit `dist/` with the
+change.
 
 `npm test` boots a real server on an ephemeral loopback port and walks the public contract: static assets, event ingestion, WebSocket snapshot and broadcast, `Range` streaming (206/416/traversal rejection), prompt routing (local, instance, leech, unknown), leech tailing of a session file and the spawn API lifecycle. It writes only to a temporary directory and exits non-zero on the first failing step, naming it.
 
