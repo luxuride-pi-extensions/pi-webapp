@@ -1,5 +1,6 @@
 import type { ComponentChildren } from "preact";
-import { useMemo } from "preact/hooks";
+import { useCallback, useMemo, useState } from "preact/hooks";
+import { type HighlightToken, highlightTokens } from "../highlight";
 
 export interface MarkdownTextProps {
 	text: string;
@@ -86,14 +87,7 @@ function parseBlocks(source: string): ComponentChildren[] {
 			}
 			lineIndex += 1; // closing fence (or end of input for an unclosed block)
 			nodes.push(
-				<pre
-					key={`code-${blockIndex++}`}
-					class="my-2 overflow-x-auto rounded-box border border-base-300 bg-base-300/40 p-2 text-xs leading-relaxed"
-				>
-					<code class="font-mono" data-language={language || undefined}>
-						{code.join("\n")}
-					</code>
-				</pre>,
+				<CodeBlock key={`code-${blockIndex++}`} language={language} code={code.join("\n")} />,
 			);
 			continue;
 		}
@@ -102,6 +96,56 @@ function parseBlocks(source: string): ComponentChildren[] {
 	}
 	flushText();
 	return nodes;
+}
+
+interface CodeBlockProps {
+	language: string;
+	code: string;
+}
+
+function renderTokens(tokens: readonly HighlightToken[], prefix: string): ComponentChildren[] {
+	return tokens.map((token, index) => {
+		if (typeof token === "string") return token;
+		return (
+			<span key={`${prefix}-${index}`} class={`hljs-${token.kind}`}>
+				{renderTokens(token.children, `${prefix}-${index}`)}
+			</span>
+		);
+	});
+}
+
+function CodeBlock({ language, code }: CodeBlockProps) {
+	const tokens = useMemo(() => highlightTokens(code, language), [code, language]);
+	const [copied, setCopied] = useState(false);
+	const copy = useCallback(() => {
+		const clipboard = typeof navigator === "undefined" ? undefined : navigator.clipboard;
+		if (!clipboard) return;
+		void clipboard.writeText(code).then(() => {
+			setCopied(true);
+			window.setTimeout(() => setCopied(false), 1_200);
+		});
+	}, [code]);
+	return (
+		<div class="group relative my-2">
+			<pre class="hljs-pre overflow-x-auto rounded-box border border-base-300 bg-base-300/40 p-2 text-xs leading-relaxed">
+				<code class="hljs font-mono" data-language={language || undefined}>
+					{renderTokens(tokens, "hl")}
+				</code>
+			</pre>
+			<div class="absolute top-1 right-1 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+				{language && <span class="badge badge-ghost badge-xs uppercase">{language}</span>}
+				<button
+					type="button"
+					class="btn btn-ghost btn-xs h-6 min-h-0 px-1.5 font-mono"
+					onClick={copy}
+					title="Copy this code block"
+					data-testid="copy-code"
+				>
+					{copied ? "copied" : "copy"}
+				</button>
+			</div>
+		</div>
+	);
 }
 
 /** Minimal safe Markdown: fenced code, inline code/bold/italic and bare links. */

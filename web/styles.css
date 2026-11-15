@@ -124,3 +124,73 @@ pre {
 	white-space: pre-line;
 	max-width: 22rem;
 }
+
+/* Syntax highlighting: highlight.js token classes on the daisyUI dark palette. */
+.hljs-pre {
+	position: relative;
+	tab-size: 2;
+}
+.hljs {
+	color: var(--color-base-content);
+}
+.hljs-comment,
+.hljs-quote {
+	color: color-mix(in oklch, var(--color-base-content) 45%, transparent);
+	font-style: italic;
+}
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-literal,
+.hljs-doctag,
+.hljs-meta .hljs-keyword {
+	color: var(--color-secondary);
+	font-weight: 500;
+}
+.hljs-string,
+.hljs-regexp,
+.hljs-addition,
+.hljs-attribute,
+.hljs-meta .hljs-string {
+	color: var(--color-success);
+}
+.hljs-number,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-variable,
+.hljs-template-variable,
+.hljs-selector-attr,
+.hljs-selector-pseudo {
+	color: var(--color-warning);
+}
+.hljs-title,
+.hljs-section,
+.hljs-title.function_,
+.hljs-title.class_ {
+	color: var(--color-info);
+	font-weight: 600;
+}
+.hljs-type,
+.hljs-built_in,
+.hljs-builtin-name,
+.hljs-class .hljs-title {
+	color: var(--color-accent);
+}
+.hljs-attr,
+.hljs-attribute,
+.hljs-property,
+.hljs-name,
+.hljs-tag {
+	color: var(--color-primary);
+}
+.hljs-deletion {
+	color: var(--color-error);
+}
+.hljs-emphasis {
+	font-style: italic;
+}
+.hljs-strong {
+	font-weight: 700;
+}
+.hljs-link {
+	text-decoration: underline;
+}

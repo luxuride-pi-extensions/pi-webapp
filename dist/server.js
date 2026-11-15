@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 import { WebSocket, WebSocketServer } from "ws";
 import { DEFAULT_HOST, DEFAULT_PORT, ENV, EVENT_HISTORY_LIMIT, WATCH_INTERVAL_MS, isPathInside, newId, num, str, truncate, } from "./protocol.js";
 import { SessionLeech } from "./leech.js";
+import { PluginError, PluginRegistry } from "./plugins.js";
 import { isPidAlive, killPid } from "./procs.js";
 import { parseSpawnRequest } from "./spawn.js";
 import { getCacheRoot, mimeForFile } from "./storage.js";
@@ -34,6 +35,7 @@ const DEFAULT_LEECH_MAX_AGE_MS = 15 * 60 * 1000;
  */
 const OWNER_BUSY_WINDOW_MS = 5_000;
 /** How long a takeover waits for a stopped pi process to release its session. */
+const MODEL_COMMAND_TIMEOUT_MS = 10_000;
 const TAKEOVER_STOP_MS = 4_000;
 const HEARTBEAT_INTERVAL_MS = 30_000;
 const SNAPSHOT_GRACE_MS = 25;
@@ -250,7 +252,11 @@ export class WebappServer {
     leechMaxAgeMs;
     ownerProbe;
     leechError = null;
+    pluginRegistry = null;
     localPromptHandler = null;
+    localModelHandler = null;
+    models = [];
+    modelAcks = new Map();
     spawner = null;
     initialPrompts = new Map();
     pendingSessionCommands = new Map();
@@ -262,6 +268,7 @@ export class WebappServer {
     sessions = new Map();
     /** Sessions the operator removed; they stay hidden even if they keep talking. */
     removedSessions = new Set();
+    sessionNames = new Map();
     events = [];
     owners = new Map();
     instanceSessions = new Map();
@@ -376,6 +383,7 @@ export class WebappServer {
     async startInternal() {
         await mkdir(this.artifactsRoot, { recursive: true }).catch(() => undefined);
         await this.loadRemovedSessions();
+        await this.loadSessionNames();
         await new Promise((resolve, reject) => {
             const onError = (error) => {
                 this.httpServer.off("listening", onListening);
@@ -508,6 +516,11 @@ export class WebappServer {
         const primary = this.sessions.get(normalized.sessionId);
         if (primary)
             primary.lastEventType = normalized.type;
+        for (const id of touched) {
+            const node = this.sessions.get(id);
+            if (node)
+                this.applyCustomName(node);
+        }
         if (normalized.type === "session_started" && this.spawner) {
             const spawnId = str(normalized.data.spawnId);
             if (spawnId) {
@@ -546,6 +559,35 @@ export class WebappServer {
     }
     setLocalPromptHandler(handler) {
         this.localPromptHandler = handler;
+    }
+    /** Local sessions can switch models through the owning extension instance. */
+    setLocalModelHandler(handler) {
+        this.localModelHandler = handler;
+    }
+    /** Models available to the attached pi instances, newest report wins. */
+    setModels(models) {
+        const next = [];
+        const seen = new Set();
+        for (const model of models) {
+            const provider = str(model.provider);
+            const id = str(model.id);
+            if (!provider || !id)
+                continue;
+            const key = `${provider}/${id}`;
+            if (seen.has(key))
+                continue;
+            seen.add(key);
+            const entry = { provider, id };
+            const name = str(model.name);
+            if (name)
+                entry.name = name;
+            next.push(entry);
+        }
+        this.models = next.sort((a, b) => a.provider.localeCompare(b.provider) || a.id.localeCompare(b.id));
+        this.broadcast({ type: "models", models: this.models });
+    }
+    getModels() {
+        return this.models.map((model) => ({ ...model }));
     }
     /** Installs the dashboard's process launcher (primary instances only). */
     setSessionSpawner(spawner) {
@@ -688,6 +730,68 @@ export class WebappServer {
     removedSessionsPath() {
         return path.join(this.artifactsRoot, ".removed-sessions.json");
     }
+    sessionNamesPath() {
+        return path.join(this.artifactsRoot, ".session-names.json");
+    }
+    /** Renames survive reloads and re-leeching, so they are kept on disk. */
+    async loadSessionNames() {
+        try {
+            const raw = await readFile(this.sessionNamesPath(), "utf8");
+            const parsed = JSON.parse(raw);
+            if (!isRecord(parsed))
+                return;
+            for (const [id, value] of Object.entries(parsed)) {
+                if (typeof value === "string" && value.trim())
+                    this.sessionNames.set(id, value.trim());
+            }
+        }
+        catch {
+            /* no renames yet */
+        }
+    }
+    async persistSessionNames() {
+        try {
+            const entries = [...this.sessionNames.entries()].slice(-1000);
+            await writeFile(this.sessionNamesPath(), JSON.stringify(Object.fromEntries(entries)));
+        }
+        catch {
+            /* renaming still works for this process */
+        }
+    }
+    applyCustomName(node) {
+        const name = this.sessionNames.get(node.id);
+        if (name)
+            node.customName = name;
+        else
+            delete node.customName;
+    }
+    /**
+     * Sets (or clears, with an empty name) the dashboard label of a session.
+     * The original agent name stays untouched so subagent roles remain visible.
+     */
+    async renameSession(sessionId, name) {
+        const node = this.sessions.get(sessionId);
+        if (!node)
+            throw new HttpError(404, "session not found");
+        const trimmed = truncate(name.trim().replace(/\s+/g, " "), 80);
+        if (trimmed)
+            this.sessionNames.set(sessionId, trimmed);
+        else
+            this.sessionNames.delete(sessionId);
+        while (this.sessionNames.size > 1000) {
+            const oldest = this.sessionNames.keys().next().value;
+            if (typeof oldest !== "string")
+                break;
+            this.sessionNames.delete(oldest);
+        }
+        this.applyCustomName(node);
+        await this.persistSessionNames();
+        this.broadcast(trimmed
+            ? { type: "session_renamed", sessionId, name: trimmed }
+            : { type: "session_renamed", sessionId });
+        this.broadcast({ type: "session", session: { ...node } });
+        return { ...node };
+    }
     async loadRemovedSessions() {
         try {
             const raw = await readFile(this.removedSessionsPath(), "utf8");
@@ -721,8 +825,7 @@ export class WebappServer {
         }
         this.broadcast({ type: "spawns", state });
     }
-    /** Drops a pending takeover marker once its spawn is no longer in flight. */
-    clearTakeover(spawnId) {
+    /** Drops a pending takeover marker once its spawn is no longer in flight. */ clearTakeover(spawnId) {
         for (const node of this.sessions.values()) {
             if (this.removedSessions.has(node.id))
                 continue;
@@ -738,6 +841,7 @@ export class WebappServer {
         let topLevel = 0;
         let subagents = 0;
         for (const node of sessions) {
+            this.applyCustomName(node);
             if (node.isSubagent) {
                 subagents += 1;
             }
@@ -776,6 +880,8 @@ export class WebappServer {
             counts: { sessions: topLevel, subagents, events: events.length },
             leech: this.getLeechStatus(),
             spawn: this.getSpawnState(),
+            models: this.getModels(),
+            plugins: this.getPlugins().list(),
             serverTime: now,
         };
     }
@@ -1107,6 +1213,115 @@ export class WebappServer {
             this.commandQueues.delete(instanceId);
         }
     }
+    /** Sends a model switch to the owning instance and waits for its ack. */
+    deliverModelCommand(command) {
+        const owner = this.owners.get(command.sessionId);
+        const client = owner ? this.instanceClients.get(owner) : undefined;
+        if (!owner || !client || client.ws.readyState !== WebSocket.OPEN) {
+            return Promise.resolve({ ok: false, error: "no pi instance is attached to this session" });
+        }
+        command.instanceId = owner;
+        return new Promise((resolve) => {
+            const timeout = setTimeout(() => {
+                this.modelAcks.delete(command.id);
+                resolve({ ok: false, error: "the pi instance did not answer in time" });
+            }, MODEL_COMMAND_TIMEOUT_MS);
+            timeout.unref?.();
+            this.modelAcks.set(command.id, (result) => {
+                clearTimeout(timeout);
+                resolve(result);
+            });
+            try {
+                client.ws.send(JSON.stringify({ type: "model_command", command }));
+            }
+            catch {
+                clearTimeout(timeout);
+                this.modelAcks.delete(command.id);
+                resolve({ ok: false, error: "the pi instance connection failed" });
+            }
+        });
+    }
+    async handleModelPost(req, res, encodedSessionId) {
+        let sessionId;
+        try {
+            sessionId = decodeURIComponent(encodedSessionId);
+        }
+        catch {
+            throw new HttpError(400, "invalid session id");
+        }
+        if (!sessionId)
+            throw new HttpError(400, "invalid session id");
+        const payload = await readJsonBody(req, MAX_API_BODY_BYTES);
+        const record = isRecord(payload) ? payload : {};
+        const provider = str(record.provider);
+        const modelId = str(record.modelId) || str(record.id);
+        if (!provider || !modelId) {
+            throw new HttpError(400, "provider and modelId are required");
+        }
+        const session = this.sessions.get(sessionId);
+        if (!session)
+            throw new HttpError(404, "session not found");
+        if (session.source === "leech") {
+            throw new HttpError(409, "session is leech-only: no pi instance is attached");
+        }
+        const command = {
+            id: newId("model"),
+            sessionId,
+            provider,
+            modelId,
+            createdAt: Date.now(),
+        };
+        if (this.localModelHandler) {
+            const local = await this.localModelHandler(command);
+            if (local.ok) {
+                sendJson(res, 200, { ok: true, delivered: "local" });
+                return;
+            }
+            if (!this.owners.has(sessionId)) {
+                sendJson(res, 409, { ok: false, error: local.error ?? "the model could not be applied" });
+                return;
+            }
+        }
+        const result = await this.deliverModelCommand(command);
+        sendJson(res, result.ok ? 200 : 409, result.ok ? { ok: true, delivered: "instance" } : result);
+    }
+    getPlugins() {
+        if (!this.pluginRegistry) {
+            this.pluginRegistry = new PluginRegistry({
+                statePath: path.join(this.artifactsRoot, ".plugins.json"),
+            });
+        }
+        return this.pluginRegistry;
+    }
+    async handlePluginPost(req, res) {
+        const payload = await readJsonBody(req, MAX_API_BODY_BYTES);
+        try {
+            const plugin = this.getPlugins().register(payload);
+            this.broadcast({ type: "plugins", plugins: this.getPlugins().list() });
+            sendJson(res, 201, { ok: true, plugin });
+        }
+        catch (error) {
+            if (error instanceof PluginError)
+                throw new HttpError(error.status, error.message);
+            throw error;
+        }
+    }
+    handlePluginAsset(res, pluginId, assetPath) {
+        const file = this.getPlugins().assetPath(pluginId, assetPath);
+        if (!file) {
+            sendJson(res, 404, { ok: false, error: "plugin asset not found" });
+            return;
+        }
+        void readFile(file).then((body) => {
+            res.writeHead(200, {
+                "content-type": mimeForFile(file),
+                "content-length": String(body.byteLength),
+                "cache-control": "no-cache",
+                "x-content-type-options": "nosniff",
+            });
+            res.end(body);
+        }, () => sendJson(res, 404, { ok: false, error: "plugin asset not found" }));
+    }
     handleConnection(ws, req) {
         let queryRole = "";
         let queryInstanceId = "";
@@ -1191,6 +1406,24 @@ export class WebappServer {
             }
             client.role = "ui";
             this.sendSnapshot(client);
+            return;
+        }
+        if (type === "models") {
+            const message = parsed;
+            if (Array.isArray(message.models))
+                this.setModels(message.models);
+            return;
+        }
+        if (type === "model_command_ack") {
+            const message = parsed;
+            const pending = this.modelAcks.get(message.commandId);
+            if (!pending)
+                return;
+            this.modelAcks.delete(message.commandId);
+            pending({
+                ok: message.ok === true,
+                ...(message.error ? { error: message.error } : {}),
+            });
             return;
         }
         if (type === "ping") {
@@ -1363,10 +1596,50 @@ export class WebappServer {
                 });
                 return;
             }
+            if (pathname === "/api/plugins") {
+                if (method === "GET") {
+                    sendJson(res, 200, { plugins: this.getPlugins().list() });
+                    return;
+                }
+                if (method === "POST") {
+                    await this.handlePluginPost(req, res);
+                    return;
+                }
+                return sendMethodNotAllowed(res, "GET, POST");
+            }
+            const pluginItemMatch = /^\/api\/plugins\/([^/]+)$/.exec(pathname);
+            if (pluginItemMatch) {
+                if (method !== "DELETE")
+                    return sendMethodNotAllowed(res, "DELETE");
+                const id = decodeURIComponent(pluginItemMatch[1] ?? "");
+                const removed = this.getPlugins().remove(id);
+                if (!removed)
+                    throw new HttpError(404, "plugin not found");
+                this.broadcast({ type: "plugins", plugins: this.getPlugins().list() });
+                sendJson(res, 200, { ok: true });
+                return;
+            }
+            if (pathname.startsWith("/plugins/")) {
+                if (method !== "GET" && method !== "HEAD")
+                    return sendMethodNotAllowed(res, "GET, HEAD");
+                const rest = pathname.slice("/plugins/".length);
+                const slash = rest.indexOf("/");
+                if (slash <= 0)
+                    return sendJson(res, 404, { ok: false, error: "plugin asset not found" });
+                this.handlePluginAsset(res, rest.slice(0, slash), rest.slice(slash + 1));
+                return;
+            }
             if (pathname === "/api/events") {
                 if (method !== "POST")
                     return sendMethodNotAllowed(res, "POST");
                 await this.handleEventsPost(req, res);
+                return;
+            }
+            const modelMatch = /^\/api\/sessions\/([^/]+)\/model$/.exec(pathname);
+            if (modelMatch) {
+                if (method !== "POST")
+                    return sendMethodNotAllowed(res, "POST");
+                await this.handleModelPost(req, res, modelMatch[1]);
                 return;
             }
             const promptMatch = /^\/api\/sessions\/([^/]+)\/prompt$/.exec(pathname);
@@ -1374,6 +1647,13 @@ export class WebappServer {
                 if (method !== "POST")
                     return sendMethodNotAllowed(res, "POST");
                 await this.handlePromptPost(req, res, promptMatch[1]);
+                return;
+            }
+            const renameMatch = /^\/api\/sessions\/([^/]+)\/rename$/.exec(pathname);
+            if (renameMatch) {
+                if (method !== "POST")
+                    return sendMethodNotAllowed(res, "POST");
+                await this.handleRenameSession(req, res, renameMatch[1]);
                 return;
             }
             const removeMatch = /^\/api\/sessions\/([^/]+)$/.exec(pathname);
@@ -1462,6 +1742,22 @@ export class WebappServer {
         const deleteFile = isRecord(payload) && payload.deleteFile === true;
         const result = await this.removeSession(sessionId, { deleteFile });
         sendJson(res, 200, { ok: true, ...result });
+    }
+    async handleRenameSession(req, res, encodedSessionId) {
+        let sessionId;
+        try {
+            sessionId = decodeURIComponent(encodedSessionId);
+        }
+        catch {
+            throw new HttpError(400, "invalid session id");
+        }
+        const payload = await readJsonBody(req, MAX_API_BODY_BYTES);
+        const raw = isRecord(payload) ? payload.name : undefined;
+        if (raw !== undefined && raw !== null && typeof raw !== "string") {
+            throw new HttpError(400, "name must be a string");
+        }
+        const session = await this.renameSession(sessionId, typeof raw === "string" ? raw : "");
+        sendJson(res, 200, { ok: true, session });
     }
     async handleEventsPost(req, res) {
         const payload = await readJsonBody(req, MAX_API_BODY_BYTES);

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import type { MediaAsset, SessionNode, WebappEvent, WebappEventType } from "../../src/protocol.js";
 import { bool, mediaList, num, str } from "../../src/protocol.js";
+import { sessionName } from "../format";
 import { MarkdownText } from "./MarkdownText";
 import { MediaCard } from "./MediaCard";
 
@@ -178,13 +179,20 @@ function ClampedMarkdown({ text }: { text: string }) {
 	);
 }
 
-function renderAssistant({ event }: RenderProps) {
+/** Whose words these are: the session's dashboard name, not a generic label. */
+function speakerFor(event: WebappEvent, sessions: SessionNode[]): string {
+	const session = sessions.find((candidate) => candidate.id === event.sessionId);
+	if (session) return sessionName(session);
+	return event.agentName ?? "agent";
+}
+
+function renderAssistant({ event, sessions }: RenderProps) {
 	const text = pickText(event, ["text", "message", "content"]);
 	const reasoning = pickString(event, ["reasoning", "thinking"]);
 	return (
 		<div class="chat chat-start">
 			<div class="chat-header mb-1 text-xs opacity-60">
-				{event.agentName ?? "agent"}
+				{speakerFor(event, sessions)}
 				<time class="ml-2 font-mono opacity-70">{clock(event.timestamp)}</time>
 			</div>
 			<div class="chat-bubble max-w-[85%] bg-base-200 text-sm text-base-content">
@@ -200,33 +208,53 @@ function renderAssistant({ event }: RenderProps) {
 	);
 }
 
-function renderToolStart({ event }: RenderProps) {
+function ToolHeader({
+	event,
+	sessions,
+	ok,
+	duration,
+}: {
+	event: WebappEvent;
+	sessions: SessionNode[];
+	ok?: boolean;
+	duration?: string;
+}) {
 	const name = pickString(event, ["name", "toolName", "tool"]) || "tool";
-	const summary = pickText(event, ["summary", "input", "args"]);
 	return (
-		<div class="flex items-center gap-2 rounded-md border border-base-300 bg-base-200/50 px-2 py-1 text-xs">
+		<div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+			{ok !== undefined && (
+				<span class={`font-mono font-bold ${ok ? "text-success" : "text-error"}`}>{ok ? "✓" : "✗"}</span>
+			)}
 			<span class="badge badge-ghost badge-xs font-mono">tool</span>
-			<span class="font-mono font-semibold">{name}</span>
-			<span class="min-w-0 truncate opacity-60">{summary}</span>
+			<span class="text-sm font-semibold">{name}</span>
+			{duration && <span class="badge badge-ghost badge-xs font-mono">{duration}</span>}
+			<span class="text-[10px] opacity-50">{speakerFor(event, sessions)}</span>
 			<time class="ml-auto shrink-0 font-mono text-[10px] opacity-40">{clock(event.timestamp)}</time>
 		</div>
 	);
 }
 
-function renderToolEnd({ event }: RenderProps) {
-	const name = pickString(event, ["name", "toolName", "tool"]) || "tool";
+function renderToolStart({ event, sessions }: RenderProps) {
+	const summary = pickText(event, ["summary", "input", "args"]);
+	return (
+		<div class="rounded-md border border-base-300 bg-base-200/50 px-2 py-1 text-xs" data-testid="tool-card">
+			<ToolHeader event={event} sessions={sessions} />
+			{summary && (
+				<pre class="mt-1 max-h-32 overflow-y-auto font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-words opacity-70">
+					{summary}
+				</pre>
+			)}
+		</div>
+	);
+}
+
+function renderToolEnd({ event, sessions }: RenderProps) {
 	const summary = pickText(event, ["summary", "result", "output", "detail", "error"]);
 	const ok = succeeded(event);
 	const duration = formatDuration(durationMs(event));
 	return (
-		<div class="rounded-md border border-base-300 bg-base-200/50 px-2 py-1 text-xs">
-			<div class="flex items-center gap-2">
-				<span class={`font-mono font-bold ${ok ? "text-success" : "text-error"}`}>{ok ? "✓" : "✗"}</span>
-				<span class="font-mono font-semibold">{name}</span>
-				{duration && <span class="badge badge-ghost badge-xs font-mono">{duration}</span>}
-				<span class="min-w-0 truncate opacity-60">{summary.split("\n")[0]}</span>
-				<time class="ml-auto shrink-0 font-mono text-[10px] opacity-40">{clock(event.timestamp)}</time>
-			</div>
+		<div class="rounded-md border border-base-300 bg-base-200/50 px-2 py-1 text-xs" data-testid="tool-card">
+			<ToolHeader event={event} sessions={sessions} ok={ok} duration={duration} />
 			{summary && (
 				<details class="mt-1" open={summary.length <= SUMMARY_DETAIL_LIMIT}>
 					<summary class="cursor-pointer text-[10px] uppercase tracking-wide opacity-50">output</summary>

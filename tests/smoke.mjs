@@ -246,6 +246,12 @@ try {
 		localPrompts.push(command);
 		return command.sessionId === parentId;
 	});
+	const localModelSwitches = [];
+	server.setLocalModelHandler((command) => {
+		if (command.sessionId !== parentId) return { ok: false, error: "not owned here" };
+		localModelSwitches.push(command);
+		return { ok: true, delivered: "local" };
+	});
 
 	await postEvent(
 		"local-1",
@@ -660,13 +666,172 @@ try {
 		!afterRevive.sessions.some((session) => session.id === spawnSessionId),
 		"a removed session is not re-added by later events",
 	);
+	step("11. session rename");
+	const renameResponse = await fetch(`${baseUrl}/api/sessions/${encodeURIComponent(parentId)}/rename`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ name: "Checkout flow" }),
+	});
+	assert.equal(renameResponse.status, 200, "POST /api/sessions/:id/rename");
+	const renameBody = await renameResponse.json();
+	assert.equal(renameBody.ok, true, "rename reports ok");
+	assert.equal(renameBody.session.customName, "Checkout flow", "rename returns the updated node");
+
+	const renamedState = await getState();
+	const renamedNode = renamedState.sessions.find((session) => session.id === parentId);
+	assert.equal(renamedNode.customName, "Checkout flow", "renamed session keeps its dashboard name");
+	const rescanRenamed = await getState();
+	assert.equal(
+		rescanRenamed.sessions.find((session) => session.id === parentId).customName,
+		"Checkout flow",
+		"the rename survives later state reads",
+	);
+
+	const badRename = await fetch(`${baseUrl}/api/sessions/${encodeURIComponent(parentId)}/rename`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ name: 42 }),
+	});
+	assert.equal(badRename.status, 400, "a non-string name is rejected");
+
+	const clearRename = await fetch(`${baseUrl}/api/sessions/${encodeURIComponent(parentId)}/rename`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ name: "" }),
+	});
+	assert.equal(clearRename.status, 200, "an empty name clears the rename");
+	const clearedState = await getState();
+	assert.equal(
+		clearedState.sessions.find((session) => session.id === parentId).customName,
+		undefined,
+		"clearing the name restores the agent label",
+	);
+	step("12. plugin registry");
+	const pluginDir = path.join(tmpRoot, "plugin-todo");
+	await mkdir(pluginDir, { recursive: true });
+	await writeFile(
+		path.join(pluginDir, "panel.html"),
+		"<!doctype html><html><body><p id=\"todos\">plugin panel</p></body></html>\n",
+	);
+	const pluginResponse = await fetch(`${baseUrl}/api/plugins`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({
+			id: "smoke-todo",
+			name: "Smoke todo",
+			dir: pluginDir,
+			panels: [{ id: "todos", title: "Todos", entry: "panel.html", height: 160 }],
+			events: ["todo"],
+		}),
+	});
+	assert.equal(pluginResponse.status, 201, "POST /api/plugins registers a plugin");
+	const pluginBody = await pluginResponse.json();
+	assert.equal(pluginBody.plugin.id, "smoke-todo");
+	assert.equal(pluginBody.plugin.panels.length, 1);
+	const pluginState = await getState();
+	assert.equal(pluginState.plugins.length, 1, "state lists the registered plugin");
+
+	const pluginAsset = await fetch(`${baseUrl}/plugins/smoke-todo/panel.html`);
+	assert.equal(pluginAsset.status, 200, "plugin assets are served");
+	assert.match(await pluginAsset.text(), /plugin panel/, "the served asset is the panel file");
+
+	const pluginTraversal = await fetch(`${baseUrl}/plugins/smoke-todo/..%2F..%2Fetc%2Fpasswd`);
+	assert.ok(pluginTraversal.status === 404 || pluginTraversal.status === 400, "plugin asset traversal is refused");
+
+	const badPlugin = await fetch(`${baseUrl}/api/plugins`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ id: "BAD ID", name: "nope", dir: pluginDir, panels: [] }),
+	});
+	assert.equal(badPlugin.status, 400, "an invalid plugin id is rejected");
+
+	const pluginDelete = await fetch(`${baseUrl}/api/plugins/smoke-todo`, { method: "DELETE" });
+	assert.equal(pluginDelete.status, 200, "DELETE /api/plugins/:id removes the plugin");
+	const pluginAssetAfter = await fetch(`${baseUrl}/plugins/smoke-todo/panel.html`);
+	assert.equal(pluginAssetAfter.status, 404, "removed plugins stop being served");
+
+	step("13. model switching");
+	const modelUrl = `${baseUrl}/api/sessions/${encodeURIComponent(parentId)}/model`;
+	const localSwitch = await fetch(modelUrl, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ provider: "anthropic", modelId: "claude-sonnet-4" }),
+	});
+	assert.equal(localSwitch.status, 200, "a local model switch is applied");
+	const localSwitchBody = await localSwitch.json();
+	assert.equal(localSwitchBody.delivered, "local");
+	assert.equal(localModelSwitches.length, 1, "the local model handler saw the switch");
+
+	const badModel = await fetch(modelUrl, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ provider: "anthropic" }),
+	});
+	assert.equal(badModel.status, 400, "a missing model id is rejected");
+
+	const unknownModelSession = await fetch(`${baseUrl}/api/sessions/does-not-exist/model`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ provider: "anthropic", modelId: "x" }),
+	});
+	assert.equal(unknownModelSession.status, 404, "an unknown session is rejected");
+
+	// Step 8 deletes its transcript to prove auto-vanish, so seed a fresh leeched session here.
+	const modelLeechId = "model-leech-1";
+	const modelLeechFile = path.join(leechProjectDir, "2026-01-02T00-00-00-000Z_model-leech-1.jsonl");
+	const modelLeechLines = [
+		{ type: "session", version: 3, id: modelLeechId, timestamp: stamp, cwd: "/tmp/leech-model" },
+		{
+			type: "message",
+			id: "model-leech-msg-1",
+			parentId: null,
+			timestamp: stamp,
+			message: { role: "user", content: [{ type: "text", text: "Can I switch models?" }] },
+		},
+	].map((line) => JSON.stringify(line));
+	await writeFile(modelLeechFile, `${modelLeechLines.join("\n")}\n`);
+	await waitFor("leeched session for the model test", async () => {
+		const current = await getState();
+		return current.sessions.find((session) => session.id === modelLeechId && session.source === "leech") ?? null;
+	});
+
+	const leechModel = await fetch(`${baseUrl}/api/sessions/${encodeURIComponent(modelLeechId)}/model`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ provider: "anthropic", modelId: "x" }),
+	});
+	assert.equal(leechModel.status, 409, "a leeched session cannot switch models");
+
+	const modelSocket = connectSocket(`ws://127.0.0.1:${serverPort}/ws?role=instance&instanceId=inst-3`);
+	await modelSocket.opened;
+	modelSocket.send({ type: "hello", role: "instance", instanceId: "inst-3" });
+	await modelSocket.waitForMessage((message) => message.type === "hello_ok", "second hello_ok");
+	const modelSessionId = "dddddddd-7777-4777-8777-777777777777";
+	await postEvent(
+		"inst-3",
+		makeEvent("session_started", modelSessionId, { data: { cwd: "/tmp/model-demo", title: "Model demo" } }),
+	);
+	const remoteSwitch = fetch(`${baseUrl}/api/sessions/${modelSessionId}/model`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ provider: "openai", modelId: "gpt-5" }),
+	});
+	const modelCommand = await modelSocket.waitForMessage(
+		(message) => message.type === "model_command" && message.command?.sessionId === modelSessionId,
+		"model command",
+	);
+	assert.equal(modelCommand.command.provider, "openai");
+	assert.equal(modelCommand.command.modelId, "gpt-5");
+	modelSocket.send({ type: "model_command_ack", commandId: modelCommand.command.id, ok: true });
+	assert.equal((await remoteSwitch).status, 200, "the instance acknowledges the model switch");
+	modelSocket.close();
 } catch (error) {
 	exitCode = 1;
 	console.error(`\n✗ SMOKE FAILED at step "${currentStep}":`);
 	console.error(error?.stack ?? String(error));
 } finally {
 	clearTimeout(watchdog);
-	step("11. cleanup");
+	step("14. cleanup");
 	try {
 		await cleanup();
 	} catch (error) {

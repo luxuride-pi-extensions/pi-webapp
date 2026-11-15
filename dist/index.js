@@ -235,6 +235,7 @@ export default function piWebapp(pi) {
                         spawn: { rootDir: PACKAGE_ROOT },
                     });
                     created.setPromptHandler(deliverPrompt);
+                    created.setModelHandler(handleModelCommand);
                     bridge = created;
                     return created;
                 }
@@ -250,6 +251,59 @@ export default function piWebapp(pi) {
             })();
         }
         await bridgePromise;
+    }
+    /** Every model this instance could switch to (authenticated providers only). */
+    function availableModels() {
+        const ctx = ctxRef;
+        if (!ctx)
+            return [];
+        return ctx.modelRegistry.getAvailable().map((model) => ({
+            provider: model.provider,
+            id: model.id,
+            name: model.name,
+        }));
+    }
+    function publishModels() {
+        try {
+            bridge?.publishModels(availableModels());
+        }
+        catch {
+            // model reporting is a convenience, never a session blocker
+        }
+    }
+    /** Applies a model switch requested from the dashboard. */
+    async function handleModelCommand(command) {
+        const ctx = ctxRef;
+        if (!ctx)
+            return { ok: false, error: "pi is not ready yet" };
+        const active = session;
+        if (!active || active.sessionId !== command.sessionId) {
+            return { ok: false, error: "this session is owned by another pi instance" };
+        }
+        const model = ctx.modelRegistry.find(command.provider, command.modelId);
+        if (!model)
+            return { ok: false, error: `unknown model ${command.provider}/${command.modelId}` };
+        try {
+            const applied = await pi.setModel(model);
+            if (!applied) {
+                return {
+                    ok: false,
+                    error: `${command.provider}/${command.modelId} has no configured credentials`,
+                };
+            }
+        }
+        catch (error) {
+            return { ok: false, error: error instanceof Error ? error.message : String(error) };
+        }
+        emit(makeEvent({
+            type: "session_meta",
+            sessionId: command.sessionId,
+            parentSessionId: active.parentSessionId,
+            agentName: active.agentName,
+            isSubagent: active.isSubagent,
+            data: { model: `${command.provider}/${command.modelId}` },
+        }));
+        return { ok: true };
     }
     /** Makes sure the always-on systemd dashboard exists before we decide to host one ourselves. */
     async function prepareAutostart() {
@@ -419,6 +473,7 @@ export default function piWebapp(pi) {
             };
             await prepareAutostart();
             await ensureBridge();
+            publishModels();
             const title = str(sessionName, path.basename(cwd) || cwd);
             const model = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined;
             emit(makeEvent({

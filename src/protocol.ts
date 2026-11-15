@@ -104,6 +104,8 @@ export interface SessionNode {
 	id: string;
 	parentSessionId?: string;
 	agentName?: string;
+	/** Operator-provided label; overrides the agent name everywhere in the UI. */
+	customName?: string;
 	title?: string;
 	cwd?: string;
 	model?: string;
@@ -206,6 +208,10 @@ export interface ServerState {
 	leech: LeechStatus;
 	/** Dashboard-launched pi processes and whether spawning is allowed. */
 	spawn: SpawnState;
+	/** Models reported by the attached pi instances (empty when none). */
+	models: ModelInfo[];
+	/** Panels contributed by other extensions. */
+	plugins: PluginInfo[];
 	serverTime: number;
 }
 
@@ -227,6 +233,44 @@ export interface PromptResponse {
 	error?: string;
 }
 
+/** A dashboard panel contributed by another pi extension. */
+export interface PluginPanel {
+	id: string;
+	title: string;
+	/** File served from the plugin's own directory. */
+	entry: string;
+	height?: number;
+	description?: string;
+}
+
+export interface PluginInfo {
+	id: string;
+	name: string;
+	version?: string;
+	description?: string;
+	panels: PluginPanel[];
+	/** Event types this plugin wants to see, e.g. ["todo"] for a todo panel. */
+	events?: string[];
+	registeredAt: number;
+}
+
+/** One model the connected pi instances can switch a session to. */
+export interface ModelInfo {
+	provider: string;
+	id: string;
+	name?: string;
+}
+
+export interface ModelCommand {
+	id: string;
+	sessionId: string;
+	provider: string;
+	modelId: string;
+	createdAt: number;
+	/** pi instance that owns the session, when known. */
+	instanceId?: string;
+}
+
 export type ServerToClientMessage =
 	| { type: "snapshot"; state: ServerState }
 	| { type: "event"; event: WebappEvent }
@@ -234,13 +278,19 @@ export type ServerToClientMessage =
 	| { type: "spawn"; spawn: SpawnRecord }
 	| { type: "spawns"; state: SpawnState }
 	| { type: "session_removed"; sessionIds: string[] }
+	| { type: "session_renamed"; sessionId: string; name?: string }
 	| { type: "command"; command: PromptCommand }
+	| { type: "model_command"; command: ModelCommand }
+	| { type: "models"; models: ModelInfo[] }
+	| { type: "plugins"; plugins: PluginInfo[] }
 	| { type: "hello_ok"; instanceId: string }
 	| { type: "pong" };
 
 export type ClientToServerMessage =
 	| { type: "hello"; role: "ui" | "instance"; instanceId?: string }
 	| { type: "command_ack"; commandId: string; ok: boolean; error?: string }
+	| { type: "model_command_ack"; commandId: string; ok: boolean; error?: string }
+	| { type: "models"; models: ModelInfo[] }
 	| { type: "ping" };
 
 export function makeEvent(input: {

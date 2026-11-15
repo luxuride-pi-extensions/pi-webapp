@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import type { DeliverAs, PromptResponse, SessionNode } from "../../src/protocol.js";
+import { sessionName } from "../format.js";
 
 export interface PromptBarProps {
 	target: SessionNode | null;
@@ -29,7 +30,8 @@ export function PromptBar({ target, onSend, disabled = false }: PromptBarProps) 
 		: target.source === "leech"
 			? "Leech-only session — take it over to resume it in pi and prompt from here"
 			: null;
-	const label = target ? `Send to ${target.agentName ?? "session"}` : "Send";
+	const name = target ? sessionName(target) : "session";
+	const label = target ? `Send to ${name}` : "Send";
 
 	const submit = useCallback(async () => {
 		const value = text.trim();
@@ -70,7 +72,7 @@ export function PromptBar({ target, onSend, disabled = false }: PromptBarProps) 
 					class="textarea textarea-sm min-h-[3.5rem] flex-1 resize-none border-base-300 font-mono text-sm"
 					rows={2}
 					value={text}
-					placeholder={hint ?? `Prompt ${target?.agentName ?? "session"}… (Enter to send, Shift+Enter for newline)`}
+					placeholder={hint ?? `Prompt ${name}… (Enter to send, Shift+Enter for newline)`}
 					disabled={blocked || sending}
 					aria-label={label}
 					onInput={(event) => setText(event.currentTarget.value)}

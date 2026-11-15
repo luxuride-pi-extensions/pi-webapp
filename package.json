@@ -1,6 +1,6 @@
 {
 	"name": "pi-webapp",
-	"version": "0.2.0",
+	"version": "0.3.0",
 	"description": "Browser dashboard for pi coding-agent sessions: live activity, subagent trees, prompts, screenshots and Playwright recordings.",
 	"type": "module",
 	"license": "MIT",
@@ -22,6 +22,7 @@
 		"src",
 		"web",
 		"dist",
+		"examples",
 		"bin",
 		"scripts",
 		"README.md",
@@ -49,6 +50,7 @@
 	"dependencies": {
 		"@juicesharp/rpiv-todo": "^2.15.0",
 		"billion-context": "^0.1.215",
+		"highlight.js": "^11.12.0",
 		"pi-lens": "^4.5.0",
 		"pi-web-access": "^0.47.0",
 		"preact": "^10.27.2",

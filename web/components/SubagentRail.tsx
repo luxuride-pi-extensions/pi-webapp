@@ -1,5 +1,6 @@
 import { useMemo } from "preact/hooks";
 import type { SessionNode, WebappEvent } from "../../src/protocol.js";
+import { sessionName } from "../format.js";
 import { StatusBadge } from "./StatusBadge";
 
 export interface SubagentRailProps {
@@ -121,7 +122,7 @@ export function SubagentRail({ session, sessions, events, onSelect }: SubagentRa
 			</header>
 			<ul class="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-2">
 				{items.map(({ session: child, last, count }) => {
-					const name = child.agentName ?? "subagent";
+					const name = sessionName(child);
 					const preview = last ? eventPreview(last) : "";
 					const running = child.status === "running";
 					return (

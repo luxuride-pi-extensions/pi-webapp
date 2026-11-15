@@ -17,6 +17,9 @@ A browser dashboard for [pi](https://github.com/earendil-works/pi) coding-agent 
 - **Navigation and focus** — every session has a deep link (`#/s/<sessionId>`), the sidebar has a filter box and status chips, and a sticky **expand all** toggle opens the whole tree (persisted per browser).
 - **Separate subagent output** — subagents report into their own right-hand rail with live status and their latest message, so their turn-by-turn chatter no longer interleaves with the main agent's feed. The parent feed keeps the spawn/completion cards and any `post_work_state` they post.
 - **Take over and remove** — a leeched session can be resumed in a fresh `pi` process (`pi --session <file>`) and prompted from the browser; sessions can be removed from the dashboard, optionally deleting their transcript. Subagents are never taken over.
+- **Readable transcripts** — code blocks are syntax-highlighted (highlight.js tokens rendered as elements, never as HTML) with a copy button, and long tool output is wrapped full-width instead of squeezing the command name.
+- **Model switching** — the session header lists the models the owning `pi` instance has authenticated and switches the session through `pi.setModel`, so a dashboard prompt can continue on a different model.
+- **Extensible panels** — other `pi` extensions can inject their own panels into the dashboard (todo lists, pi-lens findings, anything) without touching this package: register a directory and the UI sandboxes its files in an iframe fed with the selected session's events. See [Plugins](#plugins).
 - **Agent tools** — two tools agents can call on their own: `post_work_state` (milestone + screenshot/recording) and `capture_playwright_snapshot` (headless browser screenshot of a dev server).
 - **Local-first UI** — Preact frontend, Tailwind CSS v4 and daisyUI, dark by default, no external fonts, scripts or telemetry.
 - **No built-in auth, by design** — the server binds loopback only. Exposing it beyond your machine is your call; see [Security](#security) and [Running behind a reverse proxy](#running-behind-a-reverse-proxy).
@@ -200,6 +203,39 @@ Leeched sessions are read-only until you take them over.
 - **Remove** (`⌫`, or the header button) hides a session and its subagents from the dashboard and writes a tombstone to `~/.pi/cache/pi-webapp/.removed-sessions.json`, so later events and rescans do not bring it back. Dashboard-started processes are stopped first. Tick *Also delete the transcript file* to unlink the `*.jsonl` as well — that is permanent.
 
 > **Caveat: spawned sessions inherit the dashboard's environment** — `PATH`, proxies, API keys, `PI_*` configuration and anything else the daemon was started with. They run with the privileges of the user running the dashboard. Starting a session is equivalent to running `pi` in that user's shell, so anyone who can reach the dashboard can do it. See [Security](#security).
+
+### Model switching
+
+The header of a live session shows a **model** select as soon as its owning `pi` instance reported the models it has credentials for. Picking one sends `POST /api/sessions/:id/model`; the owning instance resolves it through `ctx.modelRegistry` and calls `pi.setModel`, then broadcasts a `session_meta` event so every dashboard agrees on the new model. Refused cases: leeched sessions (`409`), unknown models or providers without auth (`409` with the reason), sessions owned by another instance that is offline. The switch is per session — the configured default is untouched.
+
+## Plugins
+
+The dashboard can host panels written by other extensions. A plugin is a directory with its own HTML/JS/CSS; the dashboard sandboxes it in an iframe and feeds it the session you are looking at.
+
+```bash
+# register a plugin directory with a running dashboard
+node scripts/register-plugin.mjs examples/plugins/todo
+
+# or directly
+curl -X POST http://127.0.0.1:8787/api/plugins \
+  -H 'content-type: application/json' \
+  -d '{"id":"todo","name":"Todo list","dir":"/abs/path/to/plugin","panels":[{"id":"todos","title":"Todos","entry":"panel.html"}]}'
+```
+
+A manifest (`plugin.json` in the example) exposes `id` (`[a-z0-9-]`, 2–41 chars), `name`, `version`, `description`, `events` (event types you care about) and `panels[]` with `id`, `title`, `entry` (file inside the directory) and an optional `height`. Registration rejects relative or missing directories, entries that escape the directory, and unknown extensions; assets are served from `/plugins/<id>/<file>` with an extension allow-list.
+
+Inside the panel, listen for one message type:
+
+```js
+window.addEventListener("message", (event) => {
+  const payload = event.data;
+  if (!payload || payload.type !== "pi-webapp:session") return;
+  const { session, events } = payload;
+  render(session, events.filter((e) => e.type === "tool_end"));
+});
+```
+
+The parent posts `{ type: "pi-webapp:session", session, events }` on load and whenever the session changes, and the iframe is created with `sandbox="allow-scripts"` (no same-origin access to the dashboard). Panels are stored in `~/.pi/cache/pi-webapp/.plugins.json`; `DELETE /api/plugins/:id` unregisters one. This is how an extension ships its own view — todo state, pi-lens diagnostics, a Playwright report — without the dashboard knowing about it.
 
 ## Build from source
 
@@ -403,8 +439,8 @@ Only the port owner can start sessions: the daemon and an extension-primary both
 
 One endpoint, `/ws`, two roles.
 
-Server → client: `snapshot` (full state on connect), `event`, `session`, `session_removed`, `spawn`, `spawns`, `command`, `hello_ok`, `pong`.
-Client → server: `hello` (`role: "ui" | "instance"`, optional `instanceId`), `command_ack`, `ping`.
+Server → client: `snapshot` (full state on connect), `event`, `session`, `session_removed`, `session_renamed`, `spawn`, `spawns`, `models`, `plugins`, `command`, `model_command`, `hello_ok`, `pong`.
+Client → server: `hello` (`role: "ui" | "instance"`, optional `instanceId`), `command_ack`, `model_command_ack`, `models`, `ping`.
 
 ### HTTP API
 
@@ -415,7 +451,12 @@ Client → server: `hello` (`role: "ui" | "instance"`, optional `instanceId`), `
 | `POST` | `/api/events` | Ingest an event: `{ instanceId, event }`. Used by instances and the extension. |
 | `POST` | `/api/sessions/:sessionId/prompt` | Send a prompt to a session. `200 { ok, delivered: "local" }`, `202` when routed to another instance, `409` for leech-only sessions, `404` for unknown ids. |
 | `POST` | `/api/sessions/:sessionId/takeover` | Resume a leeched session in a new `pi` process: `202 { ok, spawn, killedPid? }`; `409 live`, `409 subagent`, `409 owner-busy`, `409 owner-running` (`{ code, canKill: true, pid }` — resend with `{ kill: true }`), `409 takeover-pending`, `403` when spawning is disabled. |
+| `POST` | `/api/sessions/:sessionId/model` | Switch the session's model: `{ provider, modelId }`. `200 { ok, delivered: "local" \| "instance" }`, `400` for a missing field, `409` for leech-only sessions or a rejected switch, `404` for unknown ids. |
 | `DELETE` | `/api/sessions/:sessionId` | Remove a session and its subagents from the dashboard. Body `{ deleteFile?: boolean }` also unlinks the transcript. `200 { ok, removed, deletedFile? }`, `404` for unknown ids. |
+| `GET` | `/api/plugins` | Registered plugin manifests. |
+| `POST` | `/api/plugins` | Register a plugin: `{ id, name, dir, panels[], events?, description?, version? }`. `201 { ok, plugin }`, `400` for an invalid manifest. |
+| `DELETE` | `/api/plugins/:id` | Unregister a plugin. `200 { ok: true }`, `404` when unknown. |
+| `GET`/`HEAD` | `/plugins/<pluginId>/<file>` | Plugin asset from the plugin's own directory (extension allow-list, no-cache). |
 | `GET` | `/api/leech` | Leech status: `enabled`, `running`, `dirs`, `files`, `sessions`, `skippedStale`, `maxAgeMs`, `lastScanAt`, `lastError`. |
 | `POST` | `/api/leech/scan` | Force a rescan of the configured session directories. |
 | `GET` | `/api/spawn` | Spawn state: `{ enabled, spawns, defaultCwd? }`. |

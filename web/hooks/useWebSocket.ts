@@ -50,6 +50,18 @@ export interface WebappConnection {
 	stopSpawn(spawnId: string): Promise<StopSpawnResult>;
 	takeOverSession(sessionId: string, options?: { kill?: boolean }): Promise<TakeOverResult>;
 	removeSession(sessionId: string, options?: { deleteFile?: boolean }): Promise<RemoveSessionResult>;
+	renameSession(sessionId: string, name: string): Promise<RenameSessionResult>;
+	switchModel(sessionId: string, provider: string, modelId: string): Promise<SwitchModelResult>;
+}
+
+export interface SwitchModelResult {
+	ok: boolean;
+	error?: string;
+}
+
+export interface RenameSessionResult {
+	ok: boolean;
+	error?: string;
 }
 
 export interface RemoveSessionResult {
@@ -122,6 +134,7 @@ function parseServerMessage(raw: string): ServerToClientMessage | null {
 			type === "spawn" ||
 			type === "spawns" ||
 			type === "session_removed" ||
+			type === "session_renamed" ||
 			type === "command" ||
 			type === "hello_ok" ||
 			type === "pong"
@@ -301,7 +314,27 @@ export function useWebSocket(): WebappConnection {
 				else if (message.type === "session") upsertSession(message.session);
 				else if (message.type === "spawn") upsertSpawn(message.spawn);
 				else if (message.type === "spawns") setSpawnState(normalizeSpawnState(message.state));
-				else if (message.type === "session_removed") {
+				else if (message.type === "session_renamed") {
+					const { sessionId, name } = message;
+					setState((previous) =>
+						previous
+							? {
+									...previous,
+									sessions: previous.sessions.map((session) => {
+										if (session.id !== sessionId) return session;
+										const next = { ...session };
+										if (name) next.customName = name;
+										else delete next.customName;
+										return next;
+									}),
+								}
+							: previous,
+					);
+				} else if (message.type === "plugins") {
+					setState((previous) => (previous ? { ...previous, plugins: message.plugins } : previous));
+				} else if (message.type === "models") {
+					setState((previous) => (previous ? { ...previous, models: message.models } : previous));
+				} else if (message.type === "session_removed") {
 					const removed = new Set(message.sessionIds);
 					setState((previous) =>
 						previous
@@ -365,6 +398,34 @@ export function useWebSocket(): WebappConnection {
 			}
 		};
 	}, [appendEvent, refreshState, replaceState, upsertSession, upsertSpawn]);
+
+	const switchModel = useCallback(
+		async (sessionId: string, provider: string, modelId: string): Promise<SwitchModelResult> => {
+			try {
+				const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/model`, {
+					method: "POST",
+					headers: { "content-type": "application/json", accept: "application/json" },
+					body: JSON.stringify({ provider, modelId }),
+				});
+				let payload: unknown = null;
+				try {
+					payload = await response.json();
+				} catch {
+					payload = null;
+				}
+				if (payload && typeof payload === "object") {
+					const record = payload as Record<string, unknown>;
+					if (record.ok === true) return { ok: true };
+					const error = typeof record.error === "string" ? record.error : undefined;
+					if (error) return { ok: false, error };
+				}
+				return { ok: false, error: `switch failed (status ${response.status})` };
+			} catch (err) {
+				return { ok: false, error: errorMessage(err) };
+			}
+		},
+		[],
+	);
 
 	const sendPrompt = useCallback(
 		async (sessionId: string, text: string, deliverAs: DeliverAs): Promise<PromptResponse> => {
@@ -496,6 +557,32 @@ export function useWebSocket(): WebappConnection {
 		[],
 	);
 
+	const renameSession = useCallback(
+		async (sessionId: string, name: string): Promise<RenameSessionResult> => {
+			try {
+				const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/rename`, {
+					method: "POST",
+					headers: { "content-type": "application/json", accept: "application/json" },
+					body: JSON.stringify({ name }),
+				});
+				let payload: unknown = null;
+				try {
+					payload = await response.json();
+				} catch {
+					payload = null;
+				}
+				const record = payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
+				if (!response.ok) {
+					return { ok: false, error: typeof record.error === "string" ? record.error : `Request failed (${response.status})` };
+				}
+				return { ok: true };
+			} catch (err) {
+				return { ok: false, error: errorMessage(err) };
+			}
+		},
+		[],
+	);
+
 	const rescanLeech = useCallback(async (): Promise<void> => {
 		try {
 			const response = await fetch("/api/leech/scan", {
@@ -525,5 +612,7 @@ export function useWebSocket(): WebappConnection {
 		stopSpawn,
 		takeOverSession,
 		removeSession,
+		renameSession,
+		switchModel,
 	};
 }

@@ -41,11 +41,22 @@ async function requestJson(url, init) {
     }
     return response.json();
 }
-async function createClientBridge(options, handlerRef) {
+async function createClientBridge(options, handlerRef, modelHandlerRef) {
     const baseUrl = `http://${options.host}:${options.port}`;
     const client = new WebappClient({
         baseUrl,
         instanceId: options.instanceId,
+        onModelCommand: async (command) => {
+            const handler = modelHandlerRef.current;
+            if (!handler)
+                return { ok: false, error: "No model handler is registered" };
+            try {
+                return await handler(command);
+            }
+            catch (error) {
+                return { ok: false, error: error instanceof Error ? error.message : String(error) };
+            }
+        },
         onCommand: async (command) => {
             const handler = handlerRef.current;
             if (!handler)
@@ -71,6 +82,12 @@ async function createClientBridge(options, handlerRef) {
         },
         setPromptHandler(handler) {
             handlerRef.current = handler;
+        },
+        setModelHandler(handler) {
+            modelHandlerRef.current = handler;
+        },
+        publishModels(models) {
+            client.sendModels(models);
         },
         async rescanLeech(dirs) {
             const body = await requestJson(`${baseUrl}/api/leech/scan`, {
@@ -120,9 +137,7 @@ export async function createBridge(options) {
         }
         if (!isAddressInUse(error))
             throw error;
-        return createClientBridge(options, {
-            current: null,
-        });
+        return createClientBridge(options, { current: null }, { current: null });
     }
     try {
         const pruning = pruneArtifacts(server.artifactsRoot, PRUNE_MAX_AGE_MS);
@@ -156,6 +171,12 @@ export async function createBridge(options) {
         },
         setPromptHandler(handler) {
             server.setLocalPromptHandler(handler);
+        },
+        setModelHandler(handler) {
+            server.setLocalModelHandler(handler);
+        },
+        publishModels(models) {
+            server.setModels(models);
         },
         rescanLeech(dirs) {
             return server.rescanLeech(dirs);

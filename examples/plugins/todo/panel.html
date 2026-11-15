@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>Todo list panel</title>
+		<style>
+			:root {
+				color-scheme: dark;
+				--bg: #1d232a;
+				--fg: #e5e7eb;
+				--muted: #9ca3af;
+				--line: #31373d;
+				--done: #34d399;
+				--active: #60a5fa;
+			}
+			body {
+				margin: 0;
+				padding: 10px 12px;
+				background: var(--bg);
+				color: var(--fg);
+				font:
+					13px/1.45 ui-sans-serif,
+					system-ui,
+					sans-serif;
+			}
+			ul {
+				margin: 0;
+				padding: 0;
+				list-style: none;
+			}
+			li {
+				display: flex;
+				gap: 8px;
+				padding: 4px 0;
+				border-bottom: 1px solid var(--line);
+			}
+			li:last-child {
+				border-bottom: 0;
+			}
+			.status {
+				font-family: ui-monospace, monospace;
+				font-size: 11px;
+				min-width: 4.5rem;
+				color: var(--muted);
+			}
+			.status.done {
+				color: var(--done);
+			}
+			.status.active {
+				color: var(--active);
+			}
+			p.empty {
+				margin: 0;
+				color: var(--muted);
+			}
+		</style>
+	</head>
+	<body>
+		<ul id="todos"></ul>
+		<p class="empty" id="empty">No todos reported for this session yet.</p>
+		<script>
+			const list = document.getElementById("todos");
+			const empty = document.getElementById("empty");
+
+			function normalize(payload) {
+				if (!payload || typeof payload !== "object") return [];
+				if (Array.isArray(payload.todos)) {
+					return payload.todos.filter((todo) => todo && typeof todo === "object");
+				}
+				if (Array.isArray(payload.items)) {
+					return payload.items.filter((item) => item && typeof item === "object");
+				}
+				return [];
+			}
+
+			function render(todos) {
+				list.replaceChildren();
+				empty.hidden = todos.length > 0;
+				for (const todo of todos) {
+					const item = document.createElement("li");
+					const status = document.createElement("span");
+					const text = document.createElement("span");
+					const state = String(todo.status ?? (todo.done === true ? "completed" : "pending"));
+					status.className = `status ${state === "completed" ? "done" : state === "in_progress" ? "active" : ""}`;
+					status.textContent = state;
+					text.textContent = String(todo.text ?? todo.title ?? todo.content ?? "");
+					item.append(status, text);
+					list.append(item);
+				}
+			}
+
+			window.addEventListener("message", (message) => {
+				const data = message.data;
+				if (!data || data.type !== "pi-webapp:session") return;
+				const events = Array.isArray(data.events) ? data.events : [];
+				for (const event of events.slice().reverse()) {
+					if (event && event.type === "todo") {
+						render(normalize(event.data));
+						return;
+					}
+				}
+				render([]);
+			});
+
+			window.postMessage({ type: "pi-webapp:ready" }, "*");
+		</script>
+	</body>
+</html>

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "preact/hooks";
 import type { SessionNode, SpawnRecord } from "../../src/protocol.js";
+import { sessionName } from "../format.js";
 import { StatusBadge } from "./StatusBadge";
 
 export interface SessionTreeProps {
@@ -15,6 +16,7 @@ export interface SessionTreeProps {
 	onTakeOver?: (session: SessionNode) => void;
 	takeoverBusyId?: string | null;
 	onRemove?: (session: SessionNode) => void;
+	onRename?: (session: SessionNode) => void;
 }
 
 interface TreeNode {
@@ -116,7 +118,7 @@ function TreeRow({
 	onContextMenu,
 }: TreeRowProps) {
 	const { session, children } = node;
-	const name = session.agentName ?? "session";
+	const name = sessionName(session);
 	const selected = selectedSessionId === session.id;
 	const hasChildren = children.length > 0;
 	const expanded = hasChildren && expandedIds.has(session.id);
@@ -242,6 +244,7 @@ export function SessionTree({
 	onTakeOver,
 	takeoverBusyId = null,
 	onRemove,
+	onRename,
 }: SessionTreeProps) {
 	// Explicit user choices win over the default (mains open, subagents closed).
 	const [overrides, setOverrides] = useState<Record<string, boolean>>({});
@@ -411,7 +414,7 @@ export function SessionTree({
 					role="menu"
 				>
 					<li class="menu-title py-0.5 text-[10px] tracking-wide uppercase">
-						<span class="max-w-44 truncate normal-case">{menuSession.agentName ?? "session"}</span>
+						<span class="max-w-44 truncate normal-case">{sessionName(menuSession)}</span>
 					</li>
 					{menuHasChildren && (
 						<li>
@@ -425,6 +428,21 @@ export function SessionTree({
 								data-testid="menu-toggle"
 							>
 								{expandedIds.has(menuSession.id) ? "Collapse subagents" : "Expand subagents"}
+							</button>
+						</li>
+					)}
+					{onRename && (
+						<li>
+							<button
+								type="button"
+								draggable={false}
+								data-testid="menu-rename"
+								onClick={() => {
+									closeMenu();
+									onRename(menuSession);
+								}}
+							>
+								Rename…
 							</button>
 						</li>
 					)}

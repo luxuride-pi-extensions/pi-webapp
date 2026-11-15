@@ -1,11 +1,18 @@
 import { WebSocket } from "ws";
 import type { RawData } from "ws";
-import type { ClientToServerMessage, PromptCommand, WebappEvent } from "./protocol.js";
+import type {
+	ClientToServerMessage,
+	ModelCommand,
+	ModelInfo,
+	PromptCommand,
+	WebappEvent,
+} from "./protocol.js";
 
 export interface WebappClientOptions {
 	baseUrl: string;
 	instanceId: string;
 	onCommand: (command: PromptCommand) => Promise<{ ok: boolean; error?: string }>;
+	onModelCommand?: (command: ModelCommand) => Promise<{ ok: boolean; error?: string }>;
 	onConnectionChange?: (connected: boolean) => void;
 }
 
@@ -179,10 +186,38 @@ export class WebappClient {
 			this.send({ type: "pong" });
 			return;
 		}
+		if (record.type === "model_command") {
+			const command = parseModelCommand(record.command);
+			if (!command) return;
+			this.commandChain = this.commandChain.then(() => this.handleModelCommand(command));
+			return;
+		}
 		if (record.type !== "command") return;
 		const command = parsePromptCommand(record.command);
 		if (!command) return;
 		this.commandChain = this.commandChain.then(() => this.handleCommand(command));
+	}
+
+	private async handleModelCommand(command: ModelCommand): Promise<void> {
+		let ok = false;
+		let error: string | undefined;
+		try {
+			if (!this.options.onModelCommand) {
+				error = "this pi instance cannot switch models from the dashboard";
+			} else {
+				const result = await this.options.onModelCommand(command);
+				ok = result.ok === true;
+				error = result.error;
+			}
+		} catch (cause) {
+			error = cause instanceof Error ? cause.message : String(cause);
+		}
+		this.send({ type: "model_command_ack", commandId: command.id, ok, error });
+	}
+
+	/** Reports the models this instance can switch to. */
+	sendModels(models: readonly ModelInfo[]): void {
+		this.send({ type: "models", models: [...models] });
 	}
 
 	private async handleCommand(command: PromptCommand): Promise<void> {
@@ -286,6 +321,32 @@ function parsePromptCommand(value: unknown): PromptCommand | null {
 		sessionId,
 		text,
 		deliverAs: deliverAs === "steer" || deliverAs === "followUp" ? deliverAs : "auto",
+		createdAt: typeof record.createdAt === "number" ? record.createdAt : Date.now(),
+	};
+	if (typeof record.instanceId === "string") command.instanceId = record.instanceId;
+	return command;
+}
+
+function parseModelCommand(value: unknown): ModelCommand | null {
+	if (!value || typeof value !== "object") return null;
+	const record = value as Record<string, unknown>;
+	const id = record.id;
+	const sessionId = record.sessionId;
+	const provider = record.provider;
+	const modelId = record.modelId;
+	if (
+		typeof id !== "string" ||
+		typeof sessionId !== "string" ||
+		typeof provider !== "string" ||
+		typeof modelId !== "string"
+	) {
+		return null;
+	}
+	const command: ModelCommand = {
+		id,
+		sessionId,
+		provider,
+		modelId,
 		createdAt: typeof record.createdAt === "number" ? record.createdAt : Date.now(),
 	};
 	if (typeof record.instanceId === "string") command.instanceId = record.instanceId;

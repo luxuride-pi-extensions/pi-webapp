@@ -1,7 +1,7 @@
 import { WebappClient } from "./client.js";
-import type { LeechStatus, PromptCommand, WebappEvent } from "./protocol.js";
+import type { LeechStatus, ModelCommand, ModelInfo, PromptCommand, WebappEvent } from "./protocol.js";
 import { WebappServer } from "./server.js";
-import type { LocalPromptHandler } from "./server.js";
+import type { LocalModelHandler, LocalPromptHandler } from "./server.js";
 import { SessionSpawner } from "./spawn.js";
 import { pruneArtifacts } from "./storage.js";
 
@@ -18,6 +18,9 @@ export interface BridgeRuntime {
 	url: string;
 	emit(event: WebappEvent): void;
 	setPromptHandler(handler: LocalPromptHandler | null): void;
+	setModelHandler(handler: LocalModelHandler | null): void;
+	/** Tells the dashboard which models this instance can switch to. */
+	publishModels(models: readonly ModelInfo[]): void;
 	rescanLeech(dirs?: string[]): Promise<LeechStatus>;
 	getLeechStatus(): Promise<LeechStatus> | LeechStatus;
 	shutdown(): Promise<void>;
@@ -66,11 +69,21 @@ async function requestJson(url: string, init: RequestInit): Promise<unknown> {
 async function createClientBridge(
 	options: BridgeOptions,
 	handlerRef: { current: LocalPromptHandler | null },
+	modelHandlerRef: { current: LocalModelHandler | null },
 ): Promise<BridgeRuntime> {
 	const baseUrl = `http://${options.host}:${options.port}`;
 	const client = new WebappClient({
 		baseUrl,
 		instanceId: options.instanceId,
+		onModelCommand: async (command: ModelCommand) => {
+			const handler = modelHandlerRef.current;
+			if (!handler) return { ok: false, error: "No model handler is registered" };
+			try {
+				return await handler(command);
+			} catch (error) {
+				return { ok: false, error: error instanceof Error ? error.message : String(error) };
+			}
+		},
 		onCommand: async (command: PromptCommand) => {
 			const handler = handlerRef.current;
 			if (!handler) return { ok: false, error: "No prompt handler is registered" };
@@ -95,6 +108,12 @@ async function createClientBridge(
 		},
 		setPromptHandler(handler: LocalPromptHandler | null) {
 			handlerRef.current = handler;
+		},
+		setModelHandler(handler: LocalModelHandler | null) {
+			modelHandlerRef.current = handler;
+		},
+		publishModels(models: readonly ModelInfo[]) {
+			client.sendModels(models);
 		},
 		async rescanLeech(dirs?: string[]): Promise<LeechStatus> {
 			const body = await requestJson(`${baseUrl}/api/leech/scan`, {
@@ -139,9 +158,11 @@ export async function createBridge(options: BridgeOptions): Promise<BridgeRuntim
 			// listen failed before the server owned any resources
 		}
 		if (!isAddressInUse(error)) throw error;
-		return createClientBridge(options, {
-			current: null,
-		});
+		return createClientBridge(
+			options,
+			{ current: null },
+			{ current: null },
+		);
 	}
 
 	try {
@@ -176,6 +197,12 @@ export async function createBridge(options: BridgeOptions): Promise<BridgeRuntim
 		},
 		setPromptHandler(handler: LocalPromptHandler | null) {
 			server.setLocalPromptHandler(handler);
+		},
+		setModelHandler(handler: LocalModelHandler | null) {
+			server.setLocalModelHandler(handler);
+		},
+		publishModels(models: readonly ModelInfo[]) {
+			server.setModels(models);
 		},
 		rescanLeech(dirs?: string[]): Promise<LeechStatus> {
 			return server.rescanLeech(dirs);

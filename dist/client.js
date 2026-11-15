@@ -173,12 +173,41 @@ export class WebappClient {
             this.send({ type: "pong" });
             return;
         }
+        if (record.type === "model_command") {
+            const command = parseModelCommand(record.command);
+            if (!command)
+                return;
+            this.commandChain = this.commandChain.then(() => this.handleModelCommand(command));
+            return;
+        }
         if (record.type !== "command")
             return;
         const command = parsePromptCommand(record.command);
         if (!command)
             return;
         this.commandChain = this.commandChain.then(() => this.handleCommand(command));
+    }
+    async handleModelCommand(command) {
+        let ok = false;
+        let error;
+        try {
+            if (!this.options.onModelCommand) {
+                error = "this pi instance cannot switch models from the dashboard";
+            }
+            else {
+                const result = await this.options.onModelCommand(command);
+                ok = result.ok === true;
+                error = result.error;
+            }
+        }
+        catch (cause) {
+            error = cause instanceof Error ? cause.message : String(cause);
+        }
+        this.send({ type: "model_command_ack", commandId: command.id, ok, error });
+    }
+    /** Reports the models this instance can switch to. */
+    sendModels(models) {
+        this.send({ type: "models", models: [...models] });
     }
     async handleCommand(command) {
         let ok = false;
@@ -286,6 +315,31 @@ function parsePromptCommand(value) {
         sessionId,
         text,
         deliverAs: deliverAs === "steer" || deliverAs === "followUp" ? deliverAs : "auto",
+        createdAt: typeof record.createdAt === "number" ? record.createdAt : Date.now(),
+    };
+    if (typeof record.instanceId === "string")
+        command.instanceId = record.instanceId;
+    return command;
+}
+function parseModelCommand(value) {
+    if (!value || typeof value !== "object")
+        return null;
+    const record = value;
+    const id = record.id;
+    const sessionId = record.sessionId;
+    const provider = record.provider;
+    const modelId = record.modelId;
+    if (typeof id !== "string" ||
+        typeof sessionId !== "string" ||
+        typeof provider !== "string" ||
+        typeof modelId !== "string") {
+        return null;
+    }
+    const command = {
+        id,
+        sessionId,
+        provider,
+        modelId,
         createdAt: typeof record.createdAt === "number" ? record.createdAt : Date.now(),
     };
     if (typeof record.instanceId === "string")

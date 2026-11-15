@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks";
-import type { DeliverAs, LeechStatus, MediaAsset, PromptResponse, SessionNode, SpawnRecord } from "../src/protocol.js";
+import type {
+	DeliverAs,
+	LeechStatus,
+	MediaAsset,
+	ModelInfo,
+	PromptResponse,
+	SessionNode,
+	SpawnRecord,
+} from "../src/protocol.js";
 import { ActivityFeed } from "./components/ActivityFeed";
+import { PluginPanels } from "./components/PluginPanels";
 import { LightboxModal } from "./components/LightboxModal";
 import { NewSessionModal } from "./components/NewSessionModal";
 import { PromptBar } from "./components/PromptBar";
@@ -8,6 +17,7 @@ import { SessionTree } from "./components/SessionTree";
 import { SubagentRail } from "./components/SubagentRail";
 import { StatusBadge } from "./components/StatusBadge";
 import { useWebSocket } from "./hooks/useWebSocket";
+import { sessionDescription, sessionName } from "./format";
 import { navigate, useRoute } from "./router";
 
 const REPO_URL = "https://github.com/luxuride-pi-extensions/pi-webapp";
@@ -51,10 +61,6 @@ function elapsedTime(startedAt: number, now: number): string {
 function basename(filePath: string): string {
 	const parts = filePath.split("/");
 	return parts[parts.length - 1] ?? filePath;
-}
-
-function sessionLabel(session: SessionNode): string {
-	return session.title ? `${session.agentName ?? "session"} — ${session.title}` : (session.agentName ?? "This session");
 }
 
 function cwdBasename(cwd: string): string {
@@ -163,7 +169,11 @@ interface SessionHeaderProps {
 	onSelect: (id: string) => void;
 	onTakeOver?: (session: SessionNode) => void;
 	onRemove?: (session: SessionNode) => void;
+	onRename?: (session: SessionNode) => void;
+	onSwitchModel?: (provider: string, modelId: string) => void;
+	models?: ModelInfo[];
 	takeoverBusy?: boolean;
+	modelBusy?: boolean;
 }
 
 function SessionHeader({
@@ -172,9 +182,13 @@ function SessionHeader({
 	onSelect,
 	onTakeOver,
 	onRemove,
+	onRename,
+	onSwitchModel,
+	models = [],
 	takeoverBusy = false,
+	modelBusy = false,
 }: SessionHeaderProps) {
-	const name = session.agentName ?? "session";
+	const name = sessionName(session);
 	const canTakeOver = session.source === "leech" && !session.isSubagent && !!onTakeOver;
 	const busy = takeoverBusy || !!session.takeoverSpawnId;
 	return (
@@ -186,7 +200,7 @@ function SessionHeader({
 						<StatusBadge status={session.status} source={session.source} size="sm" />
 						{session.isSubagent && (
 							<span class="badge badge-secondary badge-outline badge-sm">
-								subagent of {parent?.agentName ?? "parent"}
+								subagent of {parent ? sessionName(parent) : "parent"}
 							</span>
 						)}
 						{session.ownerPid !== undefined && (
@@ -215,6 +229,17 @@ function SessionHeader({
 								{busy ? "taking over…" : "take over"}
 							</button>
 						)}
+						{onRename && (
+							<button
+								type="button"
+								class="btn btn-ghost btn-xs"
+								onClick={() => onRename(session)}
+								title="Rename this session in the dashboard"
+								data-testid="rename-session"
+							>
+								rename
+							</button>
+						)}
 						{onRemove && (
 							<button
 								type="button"
@@ -239,7 +264,39 @@ function SessionHeader({
 						<span class="truncate" title={session.cwd ?? ""}>
 							cwd {session.cwd ?? "—"}
 						</span>
-						<span>model {session.model ?? "—"}</span>
+						{models.length > 0 && onSwitchModel && session.source !== "leech" ? (
+							<label class="flex items-center gap-1">
+								model
+								<select
+									class="select select-xs w-auto max-w-[16rem] font-mono text-[11px]"
+									value={session.model ?? ""}
+									disabled={modelBusy}
+									onChange={(changeEvent) => {
+										const [provider, ...rest] = String(changeEvent.currentTarget.value).split("/");
+										const modelId = rest.join("/");
+										if (provider && modelId) onSwitchModel(provider, modelId);
+									}}
+									title="Switch the model for this session"
+									data-testid="model-select"
+								>
+									{!session.model && <option value="">choose…</option>}
+									{[...new Set(models.map((model) => model.provider))].map((provider) => (
+										<optgroup key={provider} label={provider}>
+											{models
+												.filter((model) => model.provider === provider)
+												.map((model) => (
+													<option key={`${model.provider}/${model.id}`} value={`${model.provider}/${model.id}`}>
+														{model.name ?? model.id}
+													</option>
+												))}
+										</optgroup>
+									))}
+								</select>
+								{modelBusy && <span class="loading loading-spinner loading-xs" />}
+							</label>
+						) : (
+							<span>model {session.model ?? "—"}</span>
+						)}
 						<span>started {session.startedAt ? relativeTime(session.startedAt) : "—"}</span>
 						{session.isSubagent && parent && (
 							<button type="button" class="link link-primary" onClick={() => onSelect(parent.id)}>
@@ -321,7 +378,11 @@ export function App() {
 		stopSpawn,
 		takeOverSession,
 		removeSession,
+		renameSession,
+		switchModel,
 	} = useWebSocket();
+	const models = state?.models ?? [];
+	const [modelBusyId, setModelBusyId] = useState<string | null>(null);
 	const route = useRoute();
 	const selectedId = route.view === "session" ? route.sessionId : null;
 	const [lightbox, setLightbox] = useState<MediaAsset | null>(null);
@@ -330,6 +391,8 @@ export function App() {
 	const [expandAll, setExpandAll] = useState(readExpandAll);
 	const [takeoverTarget, setTakeoverTarget] = useState<SessionNode | null>(null);
 	const [removeTarget, setRemoveTarget] = useState<SessionNode | null>(null);
+	const [renameTarget, setRenameTarget] = useState<SessionNode | null>(null);
+	const [renameValue, setRenameValue] = useState("");
 	const [removeFile, setRemoveFile] = useState(false);
 	const [removeBusy, setRemoveBusy] = useState(false);
 	const [takeoverBusyId, setTakeoverBusyId] = useState<string | null>(null);
@@ -340,6 +403,16 @@ export function App() {
 	const selectSession = useCallback((id: string) => {
 		navigate({ view: "session", sessionId: id });
 	}, []);
+
+	const handleSwitchModel = useCallback(
+		async (session: SessionNode, provider: string, modelId: string) => {
+			setModelBusyId(session.id);
+			const result = await switchModel(session.id, provider, modelId);
+			setModelBusyId(null);
+			if (!result.ok) setActionError(result.error ?? "the model could not be switched");
+		},
+		[switchModel],
+	);
 
 	const toggleExpand = useCallback(() => {
 		setExpandAll((previous) => {
@@ -490,6 +563,22 @@ export function App() {
 		return () => window.removeEventListener("keydown", onKeyDown);
 	}, [takeoverTarget]);
 
+	const requestRename = useCallback((session: SessionNode) => {
+		setRenameTarget(session);
+		setRenameValue(sessionName(session));
+	}, []);
+
+	const confirmRename = useCallback(async () => {
+		const session = renameTarget;
+		if (!session) return;
+		const result = await renameSession(session.id, renameValue);
+		if (!result.ok) {
+			setActionError(result.error ?? "could not rename the session");
+			return;
+		}
+		setRenameTarget(null);
+	}, [renameTarget, renameValue, renameSession]);
+
 	const requestRemove = useCallback((session: SessionNode) => {
 		setActionError(null);
 		setRemoveFile(false);
@@ -551,6 +640,7 @@ export function App() {
 						onTakeOver={handleTakeOver}
 						takeoverBusyId={takeoverBusyId}
 						onRemove={requestRemove}
+						onRename={requestRename}
 					/>
 					<StartingSpawnList spawns={startingSpawns} onCancel={handleStopSpawn} />
 				</aside>
@@ -578,6 +668,7 @@ export function App() {
 								onSelect={selectSession}
 								onTakeOver={handleTakeOver}
 								onRemove={requestRemove}
+								onRename={requestRename}
 								takeoverBusy={takeoverBusyId === selected.id}
 							/>
 							<nav
@@ -587,7 +678,7 @@ export function App() {
 							>
 								{trail.map((node, index) => {
 									const last = index === trail.length - 1;
-									const label = node.agentName ?? "session";
+									const label = sessionName(node);
 									return (
 										<span key={node.id} class="flex shrink-0 items-center gap-1.5">
 											{index > 0 && <span class="opacity-50">/</span>}
@@ -609,6 +700,7 @@ export function App() {
 									);
 								})}
 							</nav>
+							<PluginPanels plugins={state?.plugins ?? []} session={selected} events={events} />
 							<div class="flex min-h-0 flex-1">
 								<div class="min-h-0 min-w-0 flex-1">
 									<ActivityFeed
@@ -640,6 +732,51 @@ export function App() {
 					<PromptBar target={selected} onSend={handleSend} />
 				</main>
 			</div>
+			{renameTarget && (
+				<div class="modal modal-open" role="dialog" aria-modal="true" aria-labelledby="rename-title">
+					<div class="modal-box max-w-md border border-base-300">
+						<h3 id="rename-title" class="text-base font-semibold">
+							Rename session
+						</h3>
+						<p class="py-2 text-xs opacity-70">
+							Only the dashboard label changes. The agent name and the transcript stay untouched — clear the field to
+							reset.
+						</p>
+						<input
+							class="input input-sm w-full border-base-300 bg-base-200"
+							value={renameValue}
+							maxLength={80}
+							placeholder="e.g. checkout-flow"
+							onInput={(event) => setRenameValue((event.target as HTMLInputElement).value)}
+							onKeyDown={(event) => {
+								if (event.key === "Enter") void confirmRename();
+								if (event.key === "Escape") setRenameTarget(null);
+							}}
+							data-testid="rename-input"
+							autoFocus
+						/>
+						<div class="modal-action">
+							<button type="button" class="btn btn-ghost btn-sm" onClick={() => setRenameTarget(null)}>
+								Cancel
+							</button>
+							<button
+								type="button"
+								class="btn btn-primary btn-sm"
+								onClick={() => void confirmRename()}
+								data-testid="rename-confirm"
+							>
+								Save name
+							</button>
+						</div>
+					</div>
+					<button
+						type="button"
+						class="modal-backdrop bg-black/50"
+						aria-label="Close"
+						onClick={() => setRenameTarget(null)}
+					/>
+				</div>
+			)}
 			{takeoverTarget && (
 				<div class="modal modal-open" role="dialog" aria-modal="true" aria-labelledby="takeover-title">
 					<div class="modal-box max-w-md border border-base-300">
@@ -647,7 +784,7 @@ export function App() {
 							Take over this session?
 						</h3>
 						<p class="py-2 text-sm opacity-80">
-							{sessionLabel(takeoverTarget)} is still open in pi pid {takeoverTarget.ownerPid}. Stopping that pi
+							{sessionDescription(takeoverTarget)} is still open in pi pid {takeoverTarget.ownerPid}. Stopping that pi
 							process and resuming the session in a new one lets you prompt it from the dashboard.
 						</p>
 						<p class="rounded-md bg-base-200 px-2 py-1 font-mono text-[11px] opacity-60">
@@ -682,7 +819,7 @@ export function App() {
 							Remove session?
 						</h3>
 						<p class="py-2 text-sm opacity-80">
-							{sessionLabel(removeTarget)} disappears from the dashboard
+							{sessionDescription(removeTarget)} disappears from the dashboard
 							{removeTarget.parentSessionId ? "" : " together with its subagents"}.
 							{removeTarget.spawnId ? " Its pi process is stopped." : ""}
 						</p>

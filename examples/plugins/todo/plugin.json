@@ -1,0 +1,16 @@
+{
+	"id": "todo",
+	"name": "Todo list",
+	"version": "1.0.0",
+	"description": "Shows the todos an agent reports through the todo extension, independent of pi-webapp itself.",
+	"panels": [
+		{
+			"id": "todos",
+			"title": "Todos",
+			"entry": "panel.html",
+			"height": 200,
+			"description": "Rendered from todo events posted by the dashboard client."
+		}
+	],
+	"events": ["todo"]
+}
