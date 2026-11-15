@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "preact/hooks";
 import type { SessionNode, SpawnRecord } from "../../src/protocol.js";
-import { sessionName } from "../format.js";
+import { sessionName, uniqueSessionName } from "../format.js";
 
 export interface SessionTreeProps {
 	sessions: SessionNode[];
@@ -103,6 +103,8 @@ interface TreeRowProps {
 	onToggle: (id: string) => void;
 	onSelect: (id: string) => void;
 	onContextMenu: (session: SessionNode, x: number, y: number) => void;
+	/** Every visible session, used to disambiguate identical labels. */
+	siblings: readonly SessionNode[];
 }
 
 function TreeRow({
@@ -115,9 +117,10 @@ function TreeRow({
 	onToggle,
 	onSelect,
 	onContextMenu,
+	siblings,
 }: TreeRowProps) {
 	const { session, children } = node;
-	const name = sessionName(session);
+	const name = uniqueSessionName(session, siblings);
 	const selected = selectedSessionId === session.id;
 	const hasChildren = children.length > 0;
 	const expanded = hasChildren && expandedIds.has(session.id);
@@ -150,7 +153,7 @@ function TreeRow({
 			>
 				<button
 					type="button"
-					class="flex size-5 shrink-0 items-center justify-center rounded text-[10px] opacity-65 transition hover:bg-base-300 hover:opacity-100 disabled:opacity-0"
+					class="flex size-5 shrink-0 items-center justify-center rounded text-micro opacity-65 transition hover:bg-base-300 hover:opacity-100 disabled:opacity-0"
 					onClick={() => onToggle(session.id)}
 					aria-label={expanded ? `Collapse ${name}` : `Expand ${name}`}
 					aria-expanded={expanded}
@@ -168,7 +171,7 @@ function TreeRow({
 					aria-current={selected ? "true" : undefined}
 				>
 					<span class="size-1.5 shrink-0 rounded-full" style={{ backgroundColor: agentColor(name) }} aria-hidden="true" />
-					<span class={`truncate text-[13px] ${session.isSubagent ? "font-normal" : "font-medium"}`}>{name}</span>
+					<span class={`truncate text-body ${session.isSubagent ? "font-normal" : "font-medium"}`}>{name}</span>
 					{session.busy === true ? (
 						<span
 							class="size-1.5 shrink-0 animate-pulse rounded-full bg-info"
@@ -183,17 +186,17 @@ function TreeRow({
 						/>
 					) : null}
 					{session.status === "completed" && (
-						<span class="shrink-0 text-[10px] text-success/50" aria-label="completed">
+						<span class="shrink-0 text-micro text-success/50" aria-label="completed">
 							✓
 						</span>
 					)}
 					{session.status === "failed" && (
-						<span class="shrink-0 text-[10px] text-error" aria-label="failed">
+						<span class="shrink-0 text-micro text-error" aria-label="failed">
 							✕
 						</span>
 					)}
 					{hasChildren && !expanded && (
-						<span class="shrink-0 font-mono text-[10px] opacity-65" title={`${children.length} subagent(s)`}>
+						<span class="shrink-0 font-mono text-micro opacity-65" title={`${children.length} subagent(s)`}>
 							+{children.length}
 						</span>
 					)}
@@ -202,7 +205,7 @@ function TreeRow({
 						{spawnActive && (
 							<span class="size-1 rounded-full bg-info" title="Started from the dashboard" aria-hidden="true" />
 						)}
-						<time class="font-mono text-[10px] tabular-nums opacity-60">
+						<time class="font-mono text-micro tabular-nums opacity-60">
 							{relativeTime(session.updatedAt || session.startedAt)}
 						</time>
 					</span>
@@ -219,6 +222,7 @@ function TreeRow({
 							activeSpawnIds={activeSpawnIds}
 							canTakeOver={canTakeOver}
 							takeoverBusyId={takeoverBusyId}
+							siblings={siblings}
 							onToggle={onToggle}
 							onSelect={onSelect}
 							onContextMenu={onContextMenu}
@@ -326,7 +330,7 @@ export function SessionTree({
 	if (sessions.length === 0) {
 		return (
 			<div class="p-3">
-				<div class="alert items-start border border-base-300 bg-base-200 p-3 text-xs">
+				<div class="alert items-start border border-base-300 bg-base-200 p-3 text-meta">
 					<div class="space-y-1">
 						<p class="font-semibold">No sessions yet</p>
 						<p>
@@ -344,12 +348,12 @@ export function SessionTree({
 		<div class="flex min-h-0 flex-col">
 			<div class="flex flex-col gap-1 border-b border-base-300 px-2 py-1.5">
 				<label class="input input-xs flex w-full items-center gap-1 rounded-md border-base-300 bg-base-200">
-					<span class="text-[11px] opacity-70" aria-hidden="true">
+					<span class="text-meta opacity-70" aria-hidden="true">
 						⌕
 					</span>
 					<input
 						type="search"
-						class="grow bg-transparent text-xs outline-none placeholder:opacity-70"
+						class="grow bg-transparent text-meta outline-none placeholder:opacity-70"
 						placeholder="Filter sessions…"
 						value={query}
 						onInput={(event) => setQuery((event.target as HTMLInputElement).value)}
@@ -359,7 +363,7 @@ export function SessionTree({
 					{query && (
 						<button
 							type="button"
-							class="text-[11px] opacity-70 hover:opacity-100"
+							class="text-meta opacity-70 hover:opacity-100"
 							onClick={() => setQuery("")}
 							aria-label="Clear filter"
 						>
@@ -367,7 +371,7 @@ export function SessionTree({
 						</button>
 					)}
 				</label>
-				<div class="flex items-center gap-0.5 text-[11px]">
+				<div class="flex items-center gap-0.5 text-meta">
 					{(["all", "live"] as const).map((value) => (
 						<button
 							key={value}
@@ -380,12 +384,12 @@ export function SessionTree({
 							{value}
 						</button>
 					))}
-					<span class="ml-auto font-mono text-[10px] opacity-60">{countNodes(filtered)}</span>
+					<span class="ml-auto font-mono text-micro opacity-60">{countNodes(filtered)}</span>
 				</div>
 			</div>
 			<nav aria-label="Sessions" class="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto p-2" data-testid="session-tree">
 				{filtered.length === 0 ? (
-					<p class="px-2 py-6 text-center text-xs opacity-70">No sessions match this filter.</p>
+					<p class="px-2 py-6 text-center text-meta opacity-70">No sessions match this filter.</p>
 				) : (
 					filtered.map((node) => (
 						<TreeRow
@@ -396,6 +400,7 @@ export function SessionTree({
 							activeSpawnIds={activeSpawnIds}
 							canTakeOver={!!onTakeOver}
 							takeoverBusyId={takeoverBusyId}
+							siblings={sessions}
 							onToggle={onToggle}
 							onSelect={onSelect}
 							onContextMenu={openMenu}
@@ -410,7 +415,7 @@ export function SessionTree({
 					data-testid="session-menu"
 					role="menu"
 				>
-					<li class="menu-title py-0.5 text-[10px] tracking-wide uppercase">
+					<li class="menu-title py-0.5 text-micro tracking-wide uppercase">
 						<span class="max-w-44 truncate normal-case">{sessionName(menuSession)}</span>
 					</li>
 					{menuHasChildren && (

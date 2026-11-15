@@ -97,13 +97,13 @@ function PluginPanelFrame({
 			data-plugin={plugin.id}
 			data-panel={panelId}
 		>
-			<summary class="collapse-title flex items-center gap-2 text-xs font-semibold">
+			<summary class="collapse-title flex items-center gap-2 text-meta font-semibold">
 				<span class="badge badge-ghost badge-xs">plugin</span>
 				{title}
-				<span class="font-mono text-[10px] font-normal opacity-70">{plugin.name}</span>
+				<span class="font-mono text-micro font-normal opacity-70">{plugin.name}</span>
 			</summary>
 			<div class="collapse-content pt-0">
-				{description && <p class="mb-1 text-[11px] opacity-60">{description}</p>}
+				{description && <p class="mb-1 text-meta opacity-60">{description}</p>}
 				<iframe
 					ref={frameRef}
 					class="w-full rounded-box border border-base-300 bg-base-100"

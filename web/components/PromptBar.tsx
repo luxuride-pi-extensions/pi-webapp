@@ -66,7 +66,7 @@ export function PromptBar({ target, onSend, disabled = false, onTakeOver, taking
 		const pid = target.ownerPid;
 		const busy = target.ownerBusy === true;
 		return (
-			<div class="flex items-center gap-3 border-t border-base-300 bg-base-100 px-3 py-2 text-xs">
+			<div class="flex items-center gap-3 border-t border-base-300 bg-base-100 px-3 py-2 text-meta">
 				<span class="min-w-0 truncate opacity-70">
 					{busy
 						? `Busy in pi pid ${pid} — wait for the current turn to finish.`
@@ -90,9 +90,9 @@ export function PromptBar({ target, onSend, disabled = false, onTakeOver, taking
 
 	return (
 		<div class="border-t border-base-300 bg-base-100 px-3 py-2">
-			{hint && <div class="mb-1.5 text-[11px] opacity-60">{hint}</div>}
+			{hint && <div class="mb-1.5 text-meta opacity-60">{hint}</div>}
 			{error && (
-				<div class="alert alert-error mb-2 py-1.5 text-xs" role="alert">
+				<div class="alert alert-error mb-2 py-1.5 text-meta" role="alert">
 					<span class="flex-1">{error}</span>
 					<button type="button" class="btn btn-ghost btn-xs" onClick={() => setError(null)}>
 						dismiss
@@ -100,13 +100,13 @@ export function PromptBar({ target, onSend, disabled = false, onTakeOver, taking
 				</div>
 			)}
 			{sent && (
-				<div class="mb-1.5 text-xs text-success" role="status">
+				<div class="mb-1.5 text-meta text-success" role="status">
 					sent
 				</div>
 			)}
 			<div class="flex items-end gap-2">
 				<textarea
-					class="textarea textarea-sm min-h-[3rem] flex-1 resize-none border-base-300 font-mono text-sm leading-relaxed"
+					class="textarea textarea-sm min-h-[3rem] flex-1 resize-none border-base-300 font-mono text-body leading-relaxed"
 					rows={2}
 					value={text}
 					placeholder={hint ?? `Message ${name}…  ⏎ send · ⇧⏎ newline`}
@@ -123,7 +123,7 @@ export function PromptBar({ target, onSend, disabled = false, onTakeOver, taking
 				/>
 				<div class="flex flex-col gap-1">
 					<select
-						class="select select-xs border-base-300 font-mono text-[11px]"
+						class="select select-xs border-base-300 font-mono text-meta"
 						value={deliverAs}
 						disabled={sending}
 						aria-label="Delivery mode"

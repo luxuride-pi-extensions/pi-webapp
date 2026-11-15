@@ -116,9 +116,9 @@ export function SubagentRail({ session, sessions, events, onSelect }: SubagentRa
 			data-testid="subagent-rail"
 		>
 			<header class="flex items-center gap-2 border-b border-base-300 px-3 py-2">
-				<h2 class="text-xs font-semibold tracking-wide uppercase opacity-70">Subagents</h2>
+				<h2 class="text-meta font-semibold tracking-wide uppercase opacity-70">Subagents</h2>
 				<span class="badge badge-ghost badge-xs">{items.length}</span>
-				<span class="ml-auto font-mono text-[10px] opacity-65">live</span>
+				<span class="ml-auto font-mono text-micro opacity-65">live</span>
 			</header>
 			<ul class="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-2">
 				{items.map(({ session: child, last, count }) => {
@@ -141,19 +141,19 @@ export function SubagentRail({ session, sessions, events, onSelect }: SubagentRa
 									) : live ? (
 										<span class="size-1.5 rounded-full bg-success/60" title="Running, idle" aria-hidden="true" />
 									) : null}
-									<span class="truncate text-sm font-medium">{name}</span>
+									<span class="truncate text-body font-medium">{name}</span>
 									<StatusBadge status={child.status} />
-									<span class="ml-auto font-mono text-[10px] opacity-65">
+									<span class="ml-auto font-mono text-micro opacity-65">
 										{last ? clock(last.timestamp) : ""}
 									</span>
 								</div>
-								<p class="mt-0.5 line-clamp-1 text-[11px] opacity-60">{child.title ?? "no task recorded"}</p>
+								<p class="mt-0.5 line-clamp-1 text-meta opacity-60">{child.title ?? "no task recorded"}</p>
 								{preview && (
-									<p class="mt-1 line-clamp-3 whitespace-pre-wrap break-words text-[11px] leading-snug opacity-80">
+									<p class="mt-1 line-clamp-3 whitespace-pre-wrap break-words text-meta leading-snug opacity-80">
 										{truncate(preview)}
 									</p>
 								)}
-								<div class="mt-1 flex items-center gap-2 font-mono text-[10px] opacity-65">
+								<div class="mt-1 flex items-center gap-2 font-mono text-micro opacity-65">
 									<span>{count} events</span>
 									{last && <span class="truncate">{last.type}</span>}
 									<span class="ml-auto">open →</span>

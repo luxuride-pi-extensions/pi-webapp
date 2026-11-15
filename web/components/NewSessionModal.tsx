@@ -85,7 +85,7 @@ export function NewSessionModal({ open, defaultCwd, startSession, onSpawned, onC
 						<h2 id="new-session-title" class="text-base font-semibold">
 							Start a pi session
 						</h2>
-						<p class="mt-0.5 text-xs opacity-60">
+						<p class="mt-0.5 text-meta opacity-60">
 							Launches a pi process in the working directory below and shows it in this dashboard.
 						</p>
 					</div>
@@ -107,13 +107,13 @@ export function NewSessionModal({ open, defaultCwd, startSession, onSpawned, onC
 					}}
 				>
 					<label class="flex flex-col gap-1">
-						<span class="text-xs font-medium">
+						<span class="text-meta font-medium">
 							Working directory <span class="text-error">*</span>
 						</span>
 						<input
 							ref={cwdRef}
 							type="text"
-							class="input input-sm w-full border-base-300 font-mono text-sm"
+							class="input input-sm w-full border-base-300 font-mono text-body"
 							value={cwd}
 							required
 							spellcheck={false}
@@ -123,12 +123,12 @@ export function NewSessionModal({ open, defaultCwd, startSession, onSpawned, onC
 							disabled={submitting}
 							onInput={(event) => setCwd(event.currentTarget.value)}
 						/>
-						<span class="text-[11px] opacity-70">Absolute path where the pi session runs.</span>
+						<span class="text-meta opacity-70">Absolute path where the pi session runs.</span>
 					</label>
 					<label class="flex flex-col gap-1">
-						<span class="text-xs font-medium">Initial prompt</span>
+						<span class="text-meta font-medium">Initial prompt</span>
 						<textarea
-							class="textarea textarea-sm min-h-[4.5rem] w-full resize-y border-base-300 font-mono text-sm"
+							class="textarea textarea-sm min-h-[4.5rem] w-full resize-y border-base-300 font-mono text-body"
 							rows={3}
 							value={prompt}
 							placeholder="Optional — the first message sent to the new session"
@@ -136,14 +136,14 @@ export function NewSessionModal({ open, defaultCwd, startSession, onSpawned, onC
 							disabled={submitting}
 							onInput={(event) => setPrompt(event.currentTarget.value)}
 						/>
-						<span class="text-[11px] opacity-70">Delivered as the first message once the session starts.</span>
+						<span class="text-meta opacity-70">Delivered as the first message once the session starts.</span>
 					</label>
 					<div class="grid gap-3 sm:grid-cols-2">
 						<label class="flex flex-col gap-1">
-							<span class="text-xs font-medium">Model</span>
+							<span class="text-meta font-medium">Model</span>
 							<input
 								type="text"
-								class="input input-sm w-full border-base-300 font-mono text-sm"
+								class="input input-sm w-full border-base-300 font-mono text-body"
 								value={model}
 								spellcheck={false}
 								autocomplete="off"
@@ -154,10 +154,10 @@ export function NewSessionModal({ open, defaultCwd, startSession, onSpawned, onC
 							/>
 						</label>
 						<label class="flex flex-col gap-1">
-							<span class="text-xs font-medium">Agent name</span>
+							<span class="text-meta font-medium">Agent name</span>
 							<input
 								type="text"
-								class="input input-sm w-full border-base-300 font-mono text-sm"
+								class="input input-sm w-full border-base-300 font-mono text-body"
 								value={agentName}
 								spellcheck={false}
 								autocomplete="off"
@@ -169,7 +169,7 @@ export function NewSessionModal({ open, defaultCwd, startSession, onSpawned, onC
 						</label>
 					</div>
 					{error && (
-						<div class="alert alert-error py-2 text-xs" role="alert">
+						<div class="alert alert-error py-2 text-meta" role="alert">
 							<span class="flex-1">{error}</span>
 							<button type="button" class="btn btn-ghost btn-xs" onClick={() => setError(null)}>
 								dismiss

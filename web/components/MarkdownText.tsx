@@ -125,7 +125,7 @@ function renderBlockToken(token: Token, key: string): ComponentChildren {
 			if (heading.depth === 1) return <h1 key={key} class={`${cls} text-lg`}>{body}</h1>;
 			if (heading.depth === 2) return <h2 key={key} class={`${cls} text-base`}>{body}</h2>;
 			if (heading.depth === 3) return <h3 key={key} class={`${cls} text-[0.95rem]`}>{body}</h3>;
-			return <h4 key={key} class={`${cls} text-sm uppercase tracking-wide opacity-80`}>{body}</h4>;
+			return <h4 key={key} class={`${cls} text-body uppercase tracking-wide opacity-80`}>{body}</h4>;
 		}
 		case "paragraph":
 			return (
@@ -280,7 +280,7 @@ function CodeBlock({ language, code }: CodeBlockProps) {
 	}, [code]);
 	return (
 		<div class="group relative my-2">
-			<pre class="hljs-pre overflow-x-auto rounded-box border border-base-300 bg-base-300/40 p-2 text-xs leading-relaxed">
+			<pre class="hljs-pre overflow-x-auto rounded-box border border-base-300 bg-base-300/40 p-2 text-meta leading-relaxed">
 				<code class="hljs font-mono" data-language={language || undefined}>
 					{renderHighlightTokens(tokens, "hl")}
 				</code>

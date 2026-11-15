@@ -31,6 +31,23 @@ const SUMMARY_DETAIL_LIMIT = 160;
 const OUTPUT_TOGGLE_MIN = 200;
 const EMPTY_OUTPUT = /^\(?(no output|no result|empty|undefined|null|\{\}|\[\])\)?$/i;
 
+interface ToolItem {
+	kind: "tool";
+	key: string;
+	start?: WebappEvent;
+	end?: WebappEvent;
+}
+
+type TimelineItem = ToolItem | { kind: "event"; key: string; event: WebappEvent };
+
+type TimelineRow =
+	| { kind: "tools"; key: string; items: ToolItem[] }
+	| { kind: "event"; key: string; event: WebappEvent };
+
+function callId(event: WebappEvent): string {
+	return pickString(event, ["toolCallId", "callId", "id"]);
+}
+
 const SYSTEM_LABELS: Partial<Record<WebappEventType, string>> = {
 	session_started: "session started",
 	session_ended: "session ended",
@@ -203,7 +220,7 @@ function oneLine(text: string, limit = 200): string {
 function HoverClock({ timestamp, class: className = "" }: { timestamp: number; class?: string }) {
 	return (
 		<time
-			class={`pointer-events-none font-mono text-[10px] tabular-nums opacity-0 transition-opacity group-hover:opacity-65 ${className}`}
+			class={`pointer-events-none font-mono text-micro tabular-nums opacity-0 transition-opacity group-hover:opacity-65 ${className}`}
 			title={new Date(timestamp).toLocaleString()}
 		>
 			{clock(timestamp)}
@@ -214,95 +231,125 @@ function HoverClock({ timestamp, class: className = "" }: { timestamp: number; c
 function renderAssistant({ event, sessions, selectedId, expandAll }: RenderProps) {
 	const text = pickText(event, ["text", "message", "content"]);
 	const reasoning = pickString(event, ["reasoning", "thinking"]);
-	const bubble = text.trim().length > 0;
+	const speaker = speakerFor(event, sessions, selectedId);
+	// Tool-only turns produce empty assistant messages; they would leave blank
+	// gaps in the feed for no information.
+	if (text.trim().length === 0 && reasoning.trim().length === 0) return null;
 	return (
-		<div class="group flex flex-col items-start gap-0.5">
-			<div
-				class={
-					bubble
-						? "max-w-[min(52rem,92%)] rounded-lg rounded-tl-sm bg-base-200/70 px-3 py-2 text-sm leading-relaxed"
-						: "py-0.5 text-xs"
-				}
-			>
-				{bubble && <ClampedMarkdown text={text} expandAll={expandAll} />}
-				{reasoning && (
-					<details class="mt-1 text-xs" open={expandAll} data-testid="thinking">
-						<summary class="flex cursor-pointer list-none items-baseline gap-1.5 opacity-55 transition-opacity hover:opacity-60">
-							<span class="shrink-0 text-[10px] uppercase tracking-wide">thinking</span>
-							<span class="line-clamp-1 min-w-0 flex-1 text-[11px] italic">{oneLine(reasoning, 140)}</span>
-						</summary>
-						<div class="thinking mt-1 whitespace-pre-wrap border-l border-base-300 pl-2 text-[11px] leading-relaxed opacity-60">
-							{reasoning}
-						</div>
-					</details>
+		<div class="group my-1 flex flex-col items-start gap-1">
+			{speaker && <div class="text-micro font-medium uppercase tracking-wide opacity-55">{speaker}</div>}
+			{text.trim().length > 0 && (
+				<div class="max-w-[min(46rem,100%)] text-body leading-[1.7]">
+					<ClampedMarkdown text={text} expandAll={expandAll} />
+				</div>
+			)}
+			{reasoning && (
+				<details class="w-full max-w-[min(46rem,100%)]" open={expandAll} data-testid="thinking">
+					<summary class="flex cursor-pointer list-none items-baseline gap-2 text-micro opacity-55 transition-opacity hover:opacity-80">
+						<span class="shrink-0 uppercase tracking-wide">thinking</span>
+						<span class="line-clamp-1 min-w-0 flex-1 italic">{oneLine(reasoning, 140)}</span>
+					</summary>
+					<div class="thinking mt-1 whitespace-pre-wrap border-l-2 border-base-300 pl-3 text-meta leading-relaxed opacity-70">
+						{reasoning}
+					</div>
+				</details>
+			)}
+			<HoverClock timestamp={event.timestamp} />
+		</div>
+	);
+}
+
+/** One tool call: the request, its outcome and optionally its output. */
+function ToolLine({ item, expandAll }: { item: ToolItem; expandAll: boolean }) {
+	const start = item.start;
+	const end = item.end;
+	const event = end ?? start;
+	if (!event) return null;
+	const name = pickString(event, ["name", "toolName", "tool"]) || "tool";
+	const request = start ? oneLine(pickText(start, ["summary", "input", "args", "command"]), 400) : "";
+	const output = end ? pickText(end, ["summary", "result", "output", "detail", "error"]) : "";
+	const ok = end ? succeeded(end) : undefined;
+	const duration = end ? formatDuration(durationMs(end)) : "";
+	const flatOutput = output.replace(/\s+/g, " ").trim();
+	const usefulOutput =
+		output.length > 0 && !EMPTY_OUTPUT.test(flatOutput) && !request.startsWith(flatOutput.slice(0, 60));
+	const [open, setOpen] = useState(false);
+	const expanded = expandAll || open;
+	return (
+		<div
+			class={`group flex min-w-0 flex-col rounded px-1 py-1 ${
+				ok === false ? "bg-error/10" : "hover:bg-base-200/50"
+			}`}
+			data-testid="tool-card"
+			data-event-type="tool"
+		>
+			<div class="flex min-w-0 items-baseline gap-2">
+				<span
+					class={`w-3 shrink-0 text-center font-mono text-meta ${
+						ok === undefined ? "opacity-40" : ok ? "text-success" : "text-error"
+					}`}
+					aria-label={ok === undefined ? "running" : ok ? "succeeded" : "failed"}
+				>
+					{ok === undefined ? "•" : ok ? "✓" : "✗"}
+				</span>
+				<span class="shrink-0 font-mono text-meta font-medium">{name}</span>
+				<span class="min-w-0 flex-1 truncate font-mono text-meta leading-snug opacity-60" title={request || undefined}>
+					{request}
+				</span>
+				{duration && <span class="shrink-0 font-mono text-micro tabular-nums opacity-55">{duration}</span>}
+				{usefulOutput && (
+					<button
+						type="button"
+						class="shrink-0 rounded px-1 font-mono text-micro uppercase tracking-wide opacity-0 transition-opacity group-hover:opacity-70 focus-visible:opacity-90"
+						onClick={() => setOpen((value) => !value)}
+						aria-expanded={expanded}
+						title="Show the tool output"
+					>
+						output <span aria-hidden="true">{expanded ? "▴" : "▾"}</span>
+					</button>
 				)}
-			</div>
-			<div class="flex items-center gap-2 self-end">
-				<span class="text-[10px] opacity-65">{speakerFor(event, sessions, selectedId)}</span>
 				<HoverClock timestamp={event.timestamp} />
 			</div>
-		</div>
-	);
-}
-
-function ToolHeader({
-	event,
-	ok,
-	duration,
-	summary,
-}: {
-	event: WebappEvent;
-	ok?: boolean;
-	duration?: string;
-	summary?: string;
-}) {
-	const name = pickString(event, ["name", "toolName", "tool"]) || "tool";
-	const oneLine = (summary ?? "").replace(/\s+/g, " ").trim();
-	return (
-		<div class="flex min-w-0 items-center gap-x-2">
-			{ok !== undefined && (
-				<span class={`shrink-0 font-mono text-[11px] ${ok ? "text-success" : "text-error"}`} aria-label={ok ? "succeeded" : "failed"}>
-					{ok ? "✓" : "✗"}
-				</span>
+			{usefulOutput && expanded && (
+				<pre
+					class="mt-1 ml-5 max-h-72 overflow-y-auto whitespace-pre-wrap break-words rounded border border-base-300/60 bg-base-300/25 p-2 font-mono text-meta leading-relaxed opacity-75"
+					data-testid="tool-output"
+				>
+					{output}
+				</pre>
 			)}
-			<span class="shrink-0 font-mono text-[11px] font-semibold">{name}</span>
-			{oneLine && !EMPTY_OUTPUT.test(oneLine) && (
-				<span class="line-clamp-2 min-w-0 flex-1 break-words font-mono text-[11px] leading-snug opacity-65">
-					{oneLine}
+		</div>
+	);
+}
+
+/** Consecutive tool calls read as one unit of work rather than N unrelated rows. */
+function WorkBlock({ items, expandAll }: { items: ToolItem[]; expandAll: boolean }) {
+	const [open, setOpen] = useState(true);
+	const running = items.some((item) => !item.end);
+	const failures = items.filter((item) => item.end && !succeeded(item.end)).length;
+	const total = items.reduce((sum, item) => sum + durationMs(item.end ?? item.start!), 0);
+	return (
+		<div class="group/block my-0.5" data-testid="work-block">
+			<button
+				type="button"
+				class="flex w-full items-center gap-2 rounded px-1 py-0.5 text-left text-micro uppercase tracking-wide opacity-50 hover:opacity-90"
+				onClick={() => setOpen((value) => !value)}
+				aria-expanded={open}
+			>
+				<span class="font-mono">{open ? "▾" : "▸"}</span>
+				<span>
+					{items.length} {items.length === 1 ? "step" : "steps"}
 				</span>
-			)}
-			{duration && <span class="ml-auto shrink-0 font-mono text-[10px] tabular-nums opacity-55">{duration}</span>}
-			<HoverClock timestamp={event.timestamp} class={duration ? "" : "ml-auto"} />
-		</div>
-	);
-}
-
-function renderToolStart({ event }: RenderProps) {
-	const summary = pickText(event, ["summary", "input", "args"]);
-	return (
-		<div class="group rounded-md bg-base-200/30 px-2 py-1" data-testid="tool-card">
-			<ToolHeader event={event} summary={summary} />
-		</div>
-	);
-}
-
-function renderToolEnd({ event, expandAll }: RenderProps) {
-	const summary = pickText(event, ["summary", "result", "output", "detail", "error"]);
-	const ok = succeeded(event);
-	const duration = formatDuration(durationMs(event));
-	const useful = summary && !EMPTY_OUTPUT.test(summary);
-	return (
-		<div class="group rounded-md bg-base-200/30 px-2 py-1" data-testid="tool-card">
-			<ToolHeader event={event} ok={ok} duration={duration} summary={summary} />
-			{useful && (expandAll || summary.length > OUTPUT_TOGGLE_MIN) && (
-				<details class="mt-0.5" open={expandAll} data-testid="tool-output">
-					<summary class="cursor-pointer list-none text-[10px] uppercase tracking-wide opacity-55 hover:opacity-60">
-						▸ output
-					</summary>
-					<pre class="mt-1 max-h-64 overflow-y-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed opacity-70">
-						{summary}
-					</pre>
-				</details>
+				{total > 0 && <span class="font-mono normal-case opacity-80">{formatDuration(total)}</span>}
+				{failures > 0 && <span class="text-error normal-case">{failures} failed</span>}
+				{running && <span class="text-info normal-case">running…</span>}
+			</button>
+			{open && (
+				<div class="mt-0.5 flex flex-col gap-0.5 border-l border-base-300/70 pl-2">
+					{items.map((item) => (
+						<ToolLine key={item.key} item={item} expandAll={expandAll} />
+					))}
+				</div>
 			)}
 		</div>
 	);
@@ -314,7 +361,7 @@ function renderSubagentSpawned({ event, sessions, onSelectSession }: RenderProps
 	const childId = resolveChildId(event, sessions);
 	return (
 		<div class="group rounded-md border-l-2 border-secondary/60 bg-secondary/5 py-1.5 pl-2.5 pr-2">
-			<div class="flex min-w-0 items-center gap-2 text-xs">
+			<div class="flex min-w-0 items-center gap-2 text-meta">
 				<span class="size-1.5 shrink-0 rounded-full bg-secondary" aria-hidden="true" />
 				<span class="shrink-0 font-medium">{agent}</span>
 				<span class="shrink-0 opacity-65">started</span>
@@ -322,7 +369,7 @@ function renderSubagentSpawned({ event, sessions, onSelectSession }: RenderProps
 					<HoverClock timestamp={event.timestamp} />
 				</span>
 			</div>
-			{task && <p class="mt-0.5 line-clamp-2 whitespace-pre-wrap text-[11px] leading-snug opacity-55">{task}</p>}
+			{task && <p class="mt-0.5 line-clamp-2 whitespace-pre-wrap text-meta leading-snug opacity-55">{task}</p>}
 			{childId && <OpenSessionButton id={childId} name={agent} onSelectSession={onSelectSession} />}
 		</div>
 	);
@@ -340,22 +387,22 @@ function renderSubagentCompleted({ event, sessions, onSelectSession }: RenderPro
 				ok ? "border-success/60 bg-success/5" : "border-error/70 bg-error/5"
 			}`}
 		>
-			<div class="flex min-w-0 items-center gap-2 text-xs">
+			<div class="flex min-w-0 items-center gap-2 text-meta">
 				<span class={`size-1.5 shrink-0 rounded-full ${ok ? "bg-success" : "bg-error"}`} aria-hidden="true" />
 				<span class="shrink-0 font-medium">{agent}</span>
 				<span class="shrink-0 opacity-65">{ok ? "finished" : "failed"}</span>
-				{duration && <span class="shrink-0 font-mono text-[10px] opacity-60">{duration}</span>}
+				{duration && <span class="shrink-0 font-mono text-micro opacity-60">{duration}</span>}
 				<span class="ml-auto flex shrink-0 items-center gap-2">
 					<HoverClock timestamp={event.timestamp} />
 				</span>
 			</div>
-			{summary && <p class="mt-0.5 line-clamp-3 whitespace-pre-wrap text-[11px] leading-snug opacity-55">{summary}</p>}
+			{summary && <p class="mt-0.5 line-clamp-3 whitespace-pre-wrap text-meta leading-snug opacity-55">{summary}</p>}
 			{childId && <OpenSessionButton id={childId} name={agent} onSelectSession={onSelectSession} />}
 		</div>
 	);
 }
 
-function renderWorkState({ event, showSubagent, sessions, selectedId, onSelectSession, onOpenImage, expandAll }: RenderProps) {
+function renderWorkState({ event, showSubagent, sessions, onSelectSession, onOpenImage, expandAll }: RenderProps) {
 	const title = pickString(event, ["title", "label", "name"]) || "work state";
 	const body = pickText(event, ["description", "text", "body", "detail", "message", "notes"]);
 	const rawUrl = pickString(event, ["url", "link", "href"]);
@@ -370,11 +417,11 @@ function renderWorkState({ event, showSubagent, sessions, selectedId, onSelectSe
 				{showSubagent && (
 					<SubagentTag event={event} sessions={sessions} onSelectSession={onSelectSession} />
 				)}
-				<span class="text-sm font-semibold">{title}</span>
-				<time class="ml-auto font-mono text-[10px] opacity-65">{clock(event.timestamp)}</time>
+				<span class="text-body font-semibold">{title}</span>
+				<time class="ml-auto font-mono text-micro opacity-65">{clock(event.timestamp)}</time>
 			</div>
 			{body && (
-				<div class="mt-1 text-sm">
+				<div class="mt-1 text-body">
 					<ClampedMarkdown text={body} expandAll={expandAll} />
 				</div>
 			)}
@@ -404,7 +451,7 @@ function renderSystem({ event }: RenderProps) {
 	const label = SYSTEM_LABELS[event.type] ?? event.type;
 	const detail = pickString(event, ["title", "model", "cwd", "agentName"]) || event.agentName || "";
 	return (
-		<div class="flex items-center gap-2 py-1 text-[10px] uppercase tracking-wide opacity-55">
+		<div class="flex items-center gap-2 py-1 text-micro uppercase tracking-wide opacity-55">
 			<span class="h-px flex-1 bg-base-300" />
 			<span class="shrink-0">
 				{label}
@@ -437,8 +484,8 @@ function EventRow({
 	switch (event.type) {
 		case "user_prompt":
 			content = (
-				<div class="group flex flex-col items-end gap-0.5">
-					<div class="max-w-[min(46rem,88%)] whitespace-pre-wrap rounded-lg rounded-tr-sm bg-primary px-3 py-2 text-sm leading-relaxed text-primary-content">
+				<div class="group my-1 flex flex-col items-end gap-1">
+					<div class="max-w-[min(42rem,88%)] whitespace-pre-wrap rounded-lg rounded-tr-sm border border-primary/40 bg-primary/15 px-3 py-2 text-body leading-[1.7]">
 						{pickText(event, ["text", "prompt", "message"])}
 					</div>
 					<HoverClock timestamp={event.timestamp} />
@@ -447,12 +494,6 @@ function EventRow({
 			break;
 		case "assistant_message":
 			content = renderAssistant(renderProps);
-			break;
-		case "tool_start":
-			content = renderToolStart(renderProps);
-			break;
-		case "tool_end":
-			content = renderToolEnd(renderProps);
 			break;
 		case "subagent_spawned":
 			content = renderSubagentSpawned(renderProps);
@@ -465,7 +506,7 @@ function EventRow({
 			break;
 		case "error":
 			content = (
-				<div class="alert alert-error py-2 text-sm" role="alert">
+				<div class="alert alert-error py-2 text-body" role="alert">
 					<span class="font-semibold">error</span>
 					<span class="min-w-0 whitespace-pre-wrap">
 						{pickText(event, ["message", "error", "detail"]) || "unknown error"}
@@ -478,10 +519,10 @@ function EventRow({
 				content = renderSystem(renderProps);
 			} else {
 				content = (
-					<div class="rounded-box border border-base-300 bg-base-200/40 p-2 font-mono text-xs">
+					<div class="rounded-box border border-base-300 bg-base-200/40 p-2 font-mono text-meta">
 						<div class="flex items-center gap-2">
 							<span class="badge badge-ghost badge-xs">{event.type}</span>
-							<time class="ml-auto text-[10px] opacity-65">{clock(event.timestamp)}</time>
+							<time class="ml-auto text-micro opacity-65">{clock(event.timestamp)}</time>
 						</div>
 						<pre class="mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap opacity-60">
 							{fieldText(event.data)}
@@ -529,26 +570,53 @@ export function ActivityFeed({
 		return rows.slice().sort((a, b) => a.timestamp - b.timestamp || a.id.localeCompare(b.id));
 	}, [events, selected]);
 
-	const finishedCalls = useMemo(() => {
-		const ids = new Set<string>();
-		for (const event of events) {
-			if (event.type === "tool_end") {
-				const id = pickString(event, ["toolCallId", "callId", "id"]);
-				if (id) ids.add(id);
+	// Pair each tool call with its result so one call renders as one row.
+	const timeline = useMemo<TimelineItem[]>(() => {
+		const ends = new Map<string, WebappEvent>();
+		for (const event of visible) {
+			if (event.type !== "tool_end") continue;
+			const id = callId(event);
+			if (id) ends.set(id, event);
+		}
+		const emitted = new Set<string>();
+		const items: TimelineItem[] = [];
+		for (const event of visible) {
+			if (event.type !== "tool_start" && event.type !== "tool_end") {
+				items.push({ kind: "event", key: event.id, event });
+				continue;
+			}
+			const id = callId(event);
+			if (id && emitted.has(id)) continue;
+			if (id) emitted.add(id);
+			if (event.type === "tool_start") {
+				items.push({ kind: "tool", key: `tool:${id || event.id}`, start: event, end: id ? ends.get(id) : undefined });
+			} else {
+				items.push({ kind: "tool", key: `tool:${id || event.id}`, end: event });
 			}
 		}
-		return ids;
-	}, [events]);
+		return items;
+	}, [visible]);
 
-	const mine = useMemo(
-		() =>
-			visible.filter((event) => {
-				if (event.type !== "tool_start") return true;
-				const id = pickString(event, ["toolCallId", "callId", "id"]);
-				return !id || !finishedCalls.has(id);
-			}),
-		[visible, finishedCalls],
-	);
+	// Everything between two messages or lifecycle events is one work block.
+	const rows = useMemo<TimelineRow[]>(() => {
+		const out: TimelineRow[] = [];
+		let block: ToolItem[] = [];
+		const flush = () => {
+			if (block.length === 0) return;
+			out.push({ kind: "tools", key: block[0]?.key ?? "tools", items: block });
+			block = [];
+		};
+		for (const item of timeline) {
+			if (item.kind === "tool") {
+				block.push(item);
+				continue;
+			}
+			flush();
+			out.push({ kind: "event", key: item.key, event: item.event });
+		}
+		flush();
+		return out;
+	}, [timeline]);
 
 	const lastVisibleId = visible.length > 0 ? visible[visible.length - 1]?.id : "";
 
@@ -596,17 +664,17 @@ export function ActivityFeed({
 			>
 				{selected?.isSubagent && (
 					<div class="sticky top-0 z-10 mb-3 rounded-box border border-base-300 border-l-4 border-l-secondary bg-base-200/95 p-3 backdrop-blur">
-						<div class="mb-1 text-[10px] uppercase tracking-wide opacity-70">task</div>
-						<div class="text-sm">
+						<div class="mb-1 text-micro uppercase tracking-wide opacity-70">task</div>
+						<div class="text-body">
 							<MarkdownText text={selected.task ?? "No task recorded"} />
 						</div>
 					</div>
 				)}
 				{visible.length === 0 ? (
 					<div class="flex h-full items-center justify-center p-8">
-						<div class="text-center text-sm opacity-60">
+						<div class="text-center text-body opacity-60">
 							<p class="font-semibold">No activity yet</p>
-							<p class="mt-1 text-xs">
+							<p class="mt-1 text-meta">
 								{selected?.isSubagent
 									? "This subagent has not reported activity yet."
 									: "Events will appear here as the agent works."}
@@ -614,21 +682,27 @@ export function ActivityFeed({
 						</div>
 					</div>
 				) : (
-					<div class="flex flex-col gap-1.5 pt-1">
-						{mine.map((event) => (
-							<EventRow
-								key={event.id}
-								event={event}
-								showSubagent={
-									!!selected && event.parentSessionId === selected.id && event.sessionId !== selected.id
-								}
-								sessions={sessions}
-								selectedId={selected?.id}
-								expandAll={expandAll}
-								onSelectSession={onSelectSession}
-								onOpenImage={onOpenImage}
-							/>
-						))}
+					<div class="flex flex-col gap-2 pt-1 pb-4">
+						{rows.map((row) =>
+							row.kind === "tools" ? (
+								<WorkBlock key={row.key} items={row.items} expandAll={expandAll} />
+							) : (
+								<EventRow
+									key={row.key}
+									event={row.event}
+									showSubagent={
+										!!selected &&
+										row.event.parentSessionId === selected.id &&
+										row.event.sessionId !== selected.id
+									}
+									sessions={sessions}
+									selectedId={selected?.id}
+									expandAll={expandAll}
+									onSelectSession={onSelectSession}
+									onOpenImage={onOpenImage}
+								/>
+							),
+						)}
 					</div>
 				)}
 			</div>

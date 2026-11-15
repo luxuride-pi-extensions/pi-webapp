@@ -40,11 +40,11 @@ export function LightboxModal({ asset, onClose }: LightboxModalProps) {
 		>
 			<div class="modal-box w-auto max-w-[95vw] bg-base-200 p-3">
 				<div class="mb-2 flex items-center gap-2">
-					<span class="truncate font-mono text-xs opacity-70" title={asset.filename}>
+					<span class="truncate font-mono text-meta opacity-70" title={asset.filename}>
 						{asset.filename}
 					</span>
 					<span class="badge badge-ghost badge-xs shrink-0">{formatBytes(asset.bytes)}</span>
-					<a class="link link-primary shrink-0 text-xs" href={asset.url} target="_blank" rel="noreferrer">
+					<a class="link link-primary shrink-0 text-meta" href={asset.url} target="_blank" rel="noreferrer">
 						new tab
 					</a>
 					<div class="ml-auto flex items-center gap-1">

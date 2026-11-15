@@ -25,7 +25,7 @@ export function MediaCard({ asset, onOpenImage }: MediaCardProps) {
 
 	if (failed) {
 		return (
-			<div class={`alert alert-warning p-2 text-xs ${span}`} role="status">
+			<div class={`alert alert-warning p-2 text-meta ${span}`} role="status">
 				<span class="truncate font-mono">{asset.filename}</span>
 				<span>artifact unavailable</span>
 			</div>
@@ -59,7 +59,7 @@ export function MediaCard({ asset, onOpenImage }: MediaCardProps) {
 					/>
 				</button>
 			)}
-			<figcaption class="flex items-center gap-2 px-2 py-1 text-[11px]">
+			<figcaption class="flex items-center gap-2 px-2 py-1 text-meta">
 				<span class="truncate font-mono opacity-70" title={asset.filename}>
 					{asset.filename}
 				</span>
