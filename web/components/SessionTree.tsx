@@ -150,7 +150,7 @@ function TreeRow({
 			>
 				<button
 					type="button"
-					class="flex size-5 shrink-0 items-center justify-center rounded text-[10px] opacity-40 transition hover:bg-base-300 hover:opacity-100 disabled:opacity-0"
+					class="flex size-5 shrink-0 items-center justify-center rounded text-[10px] opacity-65 transition hover:bg-base-300 hover:opacity-100 disabled:opacity-0"
 					onClick={() => onToggle(session.id)}
 					aria-label={expanded ? `Collapse ${name}` : `Expand ${name}`}
 					aria-expanded={expanded}
@@ -183,7 +183,7 @@ function TreeRow({
 						</span>
 					)}
 					{hasChildren && !expanded && (
-						<span class="shrink-0 font-mono text-[10px] opacity-40" title={`${children.length} subagent(s)`}>
+						<span class="shrink-0 font-mono text-[10px] opacity-65" title={`${children.length} subagent(s)`}>
 							+{children.length}
 						</span>
 					)}
@@ -192,7 +192,7 @@ function TreeRow({
 						{spawnActive && (
 							<span class="size-1 rounded-full bg-info" title="Started from the dashboard" aria-hidden="true" />
 						)}
-						<time class="font-mono text-[10px] tabular-nums opacity-35">
+						<time class="font-mono text-[10px] tabular-nums opacity-60">
 							{relativeTime(session.updatedAt || session.startedAt)}
 						</time>
 					</span>
@@ -333,12 +333,12 @@ export function SessionTree({
 		<div class="flex min-h-0 flex-col">
 			<div class="flex flex-col gap-1 border-b border-base-300 px-2 py-1.5">
 				<label class="input input-xs flex w-full items-center gap-1 rounded-md border-base-300 bg-base-200">
-					<span class="text-[11px] opacity-50" aria-hidden="true">
+					<span class="text-[11px] opacity-70" aria-hidden="true">
 						⌕
 					</span>
 					<input
 						type="search"
-						class="grow bg-transparent text-xs outline-none placeholder:opacity-50"
+						class="grow bg-transparent text-xs outline-none placeholder:opacity-70"
 						placeholder="Filter sessions…"
 						value={query}
 						onInput={(event) => setQuery((event.target as HTMLInputElement).value)}
@@ -348,7 +348,7 @@ export function SessionTree({
 					{query && (
 						<button
 							type="button"
-							class="text-[11px] opacity-50 hover:opacity-100"
+							class="text-[11px] opacity-70 hover:opacity-100"
 							onClick={() => setQuery("")}
 							aria-label="Clear filter"
 						>
@@ -361,7 +361,7 @@ export function SessionTree({
 						<button
 							key={value}
 							type="button"
-							class={`btn btn-ghost btn-xs h-6 min-h-0 px-2 font-normal ${statusFilter === value ? "bg-base-300 text-base-content" : "opacity-50"}`}
+							class={`btn btn-ghost btn-xs h-6 min-h-0 px-2 font-normal ${statusFilter === value ? "bg-base-300 text-base-content" : "opacity-70"}`}
 							aria-pressed={statusFilter === value}
 							onClick={() => setStatusFilter(value)}
 							data-testid="status-filter"
@@ -369,12 +369,12 @@ export function SessionTree({
 							{value}
 						</button>
 					))}
-					<span class="ml-auto font-mono text-[10px] opacity-35">{countNodes(filtered)}</span>
+					<span class="ml-auto font-mono text-[10px] opacity-60">{countNodes(filtered)}</span>
 				</div>
 			</div>
 			<nav aria-label="Sessions" class="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto p-2" data-testid="session-tree">
 				{filtered.length === 0 ? (
-					<p class="px-2 py-6 text-center text-xs opacity-50">No sessions match this filter.</p>
+					<p class="px-2 py-6 text-center text-xs opacity-70">No sessions match this filter.</p>
 				) : (
 					filtered.map((node) => (
 						<TreeRow

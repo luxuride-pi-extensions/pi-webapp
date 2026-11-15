@@ -63,7 +63,7 @@ export function MediaCard({ asset, onOpenImage }: MediaCardProps) {
 				<span class="truncate font-mono opacity-70" title={asset.filename}>
 					{asset.filename}
 				</span>
-				<span class="ml-auto shrink-0 opacity-50">{formatBytes(asset.bytes)}</span>
+				<span class="ml-auto shrink-0 opacity-70">{formatBytes(asset.bytes)}</span>
 				{isVideo && (
 					<a class="link link-primary shrink-0" href={asset.url} download={asset.filename} rel="noreferrer">
 						download

@@ -6,6 +6,8 @@ import { MarkdownText } from "./MarkdownText";
 import { MediaCard } from "./MediaCard";
 
 export interface ActivityFeedProps {
+	/** Global expand toggle: opens every collapsed message, tool output and thinking block. */
+	expandAll?: boolean;
 	events: WebappEvent[];
 	sessions: SessionNode[];
 	selected: SessionNode | null;
@@ -151,6 +153,7 @@ function OpenSessionButton({ id, name, onSelectSession }: { id: string; name: st
 
 interface RenderProps {
 	selectedId?: string;
+	expandAll?: boolean;
 	event: WebappEvent;
 	showSubagent: boolean;
 	sessions: SessionNode[];
@@ -162,10 +165,10 @@ interface RenderProps {
  * Long agent output stays readable: clamp the bubble, keep the full text one
  * click away.
  */
-function ClampedMarkdown({ text }: { text: string }) {
+function ClampedMarkdown({ text, expandAll = false }: { text: string; expandAll?: boolean }) {
 	const [open, setOpen] = useState(false);
 	const long = text.length > 700 || text.split("\n").length > 10;
-	if (!long) return <MarkdownText text={text} />;
+	if (!long || expandAll) return <MarkdownText text={text} />;
 	return (
 		<div>
 			<div class={open ? undefined : "max-h-56 overflow-hidden [mask-image:linear-gradient(to_bottom,black_70%,transparent)]"}>
@@ -200,7 +203,7 @@ function oneLine(text: string, limit = 200): string {
 function HoverClock({ timestamp, class: className = "" }: { timestamp: number; class?: string }) {
 	return (
 		<time
-			class={`pointer-events-none font-mono text-[10px] tabular-nums opacity-0 transition-opacity group-hover:opacity-40 ${className}`}
+			class={`pointer-events-none font-mono text-[10px] tabular-nums opacity-0 transition-opacity group-hover:opacity-65 ${className}`}
 			title={new Date(timestamp).toLocaleString()}
 		>
 			{clock(timestamp)}
@@ -208,7 +211,7 @@ function HoverClock({ timestamp, class: className = "" }: { timestamp: number; c
 	);
 }
 
-function renderAssistant({ event, sessions, selectedId }: RenderProps) {
+function renderAssistant({ event, sessions, selectedId, expandAll }: RenderProps) {
 	const text = pickText(event, ["text", "message", "content"]);
 	const reasoning = pickString(event, ["reasoning", "thinking"]);
 	const bubble = text.trim().length > 0;
@@ -221,10 +224,10 @@ function renderAssistant({ event, sessions, selectedId }: RenderProps) {
 						: "py-0.5 text-xs"
 				}
 			>
-				{bubble && <ClampedMarkdown text={text} />}
+				{bubble && <ClampedMarkdown text={text} expandAll={expandAll} />}
 				{reasoning && (
-					<details class="mt-1 text-xs">
-						<summary class="flex cursor-pointer list-none items-baseline gap-1.5 opacity-30 transition-opacity hover:opacity-60">
+					<details class="mt-1 text-xs" open={expandAll} data-testid="thinking">
+						<summary class="flex cursor-pointer list-none items-baseline gap-1.5 opacity-55 transition-opacity hover:opacity-60">
 							<span class="shrink-0 text-[10px] uppercase tracking-wide">thinking</span>
 							<span class="line-clamp-1 min-w-0 flex-1 text-[11px] italic">{oneLine(reasoning, 140)}</span>
 						</summary>
@@ -235,7 +238,7 @@ function renderAssistant({ event, sessions, selectedId }: RenderProps) {
 				)}
 			</div>
 			<div class="flex items-center gap-2 self-end">
-				<span class="text-[10px] opacity-25">{speakerFor(event, sessions, selectedId)}</span>
+				<span class="text-[10px] opacity-65">{speakerFor(event, sessions, selectedId)}</span>
 				<HoverClock timestamp={event.timestamp} />
 			</div>
 		</div>
@@ -264,11 +267,11 @@ function ToolHeader({
 			)}
 			<span class="shrink-0 font-mono text-[11px] font-semibold">{name}</span>
 			{oneLine && !EMPTY_OUTPUT.test(oneLine) && (
-				<span class="line-clamp-2 min-w-0 flex-1 break-words font-mono text-[11px] leading-snug opacity-45">
+				<span class="line-clamp-2 min-w-0 flex-1 break-words font-mono text-[11px] leading-snug opacity-65">
 					{oneLine}
 				</span>
 			)}
-			{duration && <span class="ml-auto shrink-0 font-mono text-[10px] tabular-nums opacity-30">{duration}</span>}
+			{duration && <span class="ml-auto shrink-0 font-mono text-[10px] tabular-nums opacity-55">{duration}</span>}
 			<HoverClock timestamp={event.timestamp} class={duration ? "" : "ml-auto"} />
 		</div>
 	);
@@ -283,7 +286,7 @@ function renderToolStart({ event }: RenderProps) {
 	);
 }
 
-function renderToolEnd({ event }: RenderProps) {
+function renderToolEnd({ event, expandAll }: RenderProps) {
 	const summary = pickText(event, ["summary", "result", "output", "detail", "error"]);
 	const ok = succeeded(event);
 	const duration = formatDuration(durationMs(event));
@@ -291,9 +294,9 @@ function renderToolEnd({ event }: RenderProps) {
 	return (
 		<div class="group rounded-md bg-base-200/30 px-2 py-1" data-testid="tool-card">
 			<ToolHeader event={event} ok={ok} duration={duration} summary={summary} />
-			{useful && summary.length > OUTPUT_TOGGLE_MIN && (
-				<details class="mt-0.5">
-					<summary class="cursor-pointer list-none text-[10px] uppercase tracking-wide opacity-30 hover:opacity-60">
+			{useful && (expandAll || summary.length > OUTPUT_TOGGLE_MIN) && (
+				<details class="mt-0.5" open={expandAll} data-testid="tool-output">
+					<summary class="cursor-pointer list-none text-[10px] uppercase tracking-wide opacity-55 hover:opacity-60">
 						▸ output
 					</summary>
 					<pre class="mt-1 max-h-64 overflow-y-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed opacity-70">
@@ -314,7 +317,7 @@ function renderSubagentSpawned({ event, sessions, onSelectSession }: RenderProps
 			<div class="flex min-w-0 items-center gap-2 text-xs">
 				<span class="size-1.5 shrink-0 rounded-full bg-secondary" aria-hidden="true" />
 				<span class="shrink-0 font-medium">{agent}</span>
-				<span class="shrink-0 opacity-40">started</span>
+				<span class="shrink-0 opacity-65">started</span>
 				<span class="ml-auto flex shrink-0 items-center gap-2">
 					<HoverClock timestamp={event.timestamp} />
 				</span>
@@ -340,8 +343,8 @@ function renderSubagentCompleted({ event, sessions, onSelectSession }: RenderPro
 			<div class="flex min-w-0 items-center gap-2 text-xs">
 				<span class={`size-1.5 shrink-0 rounded-full ${ok ? "bg-success" : "bg-error"}`} aria-hidden="true" />
 				<span class="shrink-0 font-medium">{agent}</span>
-				<span class="shrink-0 opacity-40">{ok ? "finished" : "failed"}</span>
-				{duration && <span class="shrink-0 font-mono text-[10px] opacity-35">{duration}</span>}
+				<span class="shrink-0 opacity-65">{ok ? "finished" : "failed"}</span>
+				{duration && <span class="shrink-0 font-mono text-[10px] opacity-60">{duration}</span>}
 				<span class="ml-auto flex shrink-0 items-center gap-2">
 					<HoverClock timestamp={event.timestamp} />
 				</span>
@@ -352,7 +355,7 @@ function renderSubagentCompleted({ event, sessions, onSelectSession }: RenderPro
 	);
 }
 
-function renderWorkState({ event, showSubagent, sessions, onSelectSession, onOpenImage }: RenderProps) {
+function renderWorkState({ event, showSubagent, sessions, selectedId, onSelectSession, onOpenImage, expandAll }: RenderProps) {
 	const title = pickString(event, ["title", "label", "name"]) || "work state";
 	const body = pickText(event, ["description", "text", "body", "detail", "message", "notes"]);
 	const rawUrl = pickString(event, ["url", "link", "href"]);
@@ -368,11 +371,11 @@ function renderWorkState({ event, showSubagent, sessions, onSelectSession, onOpe
 					<SubagentTag event={event} sessions={sessions} onSelectSession={onSelectSession} />
 				)}
 				<span class="text-sm font-semibold">{title}</span>
-				<time class="ml-auto font-mono text-[10px] opacity-40">{clock(event.timestamp)}</time>
+				<time class="ml-auto font-mono text-[10px] opacity-65">{clock(event.timestamp)}</time>
 			</div>
 			{body && (
 				<div class="mt-1 text-sm">
-					<ClampedMarkdown text={body} />
+					<ClampedMarkdown text={body} expandAll={expandAll} />
 				</div>
 			)}
 			{url && (
@@ -401,7 +404,7 @@ function renderSystem({ event }: RenderProps) {
 	const label = SYSTEM_LABELS[event.type] ?? event.type;
 	const detail = pickString(event, ["title", "model", "cwd", "agentName"]) || event.agentName || "";
 	return (
-		<div class="flex items-center gap-2 py-1 text-[10px] uppercase tracking-wide opacity-30">
+		<div class="flex items-center gap-2 py-1 text-[10px] uppercase tracking-wide opacity-55">
 			<span class="h-px flex-1 bg-base-300" />
 			<span class="shrink-0">
 				{label}
@@ -412,8 +415,24 @@ function renderSystem({ event }: RenderProps) {
 	);
 }
 
-function EventRow({ event, showSubagent, sessions, selectedId, onSelectSession, onOpenImage }: RenderProps) {
-	const renderProps: RenderProps = { event, showSubagent, sessions, selectedId, onSelectSession, onOpenImage };
+function EventRow({
+	event,
+	showSubagent,
+	sessions,
+	selectedId,
+	expandAll,
+	onSelectSession,
+	onOpenImage,
+}: RenderProps) {
+	const renderProps: RenderProps = {
+		event,
+		showSubagent,
+		sessions,
+		selectedId,
+		expandAll,
+		onSelectSession,
+		onOpenImage,
+	};
 	let content;
 	switch (event.type) {
 		case "user_prompt":
@@ -462,7 +481,7 @@ function EventRow({ event, showSubagent, sessions, selectedId, onSelectSession, 
 					<div class="rounded-box border border-base-300 bg-base-200/40 p-2 font-mono text-xs">
 						<div class="flex items-center gap-2">
 							<span class="badge badge-ghost badge-xs">{event.type}</span>
-							<time class="ml-auto text-[10px] opacity-40">{clock(event.timestamp)}</time>
+							<time class="ml-auto text-[10px] opacity-65">{clock(event.timestamp)}</time>
 						</div>
 						<pre class="mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap opacity-60">
 							{fieldText(event.data)}
@@ -483,7 +502,14 @@ function EventRow({ event, showSubagent, sessions, selectedId, onSelectSession, 
 	);
 }
 
-export function ActivityFeed({ events, sessions, selected, onSelectSession, onOpenImage }: ActivityFeedProps) {
+export function ActivityFeed({
+	events,
+	sessions,
+	selected,
+	expandAll = false,
+	onSelectSession,
+	onOpenImage,
+}: ActivityFeedProps) {
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const atBottomRef = useRef(true);
 	const [atBottom, setAtBottom] = useState(true);
@@ -570,7 +596,7 @@ export function ActivityFeed({ events, sessions, selected, onSelectSession, onOp
 			>
 				{selected?.isSubagent && (
 					<div class="sticky top-0 z-10 mb-3 rounded-box border border-base-300 border-l-4 border-l-secondary bg-base-200/95 p-3 backdrop-blur">
-						<div class="mb-1 text-[10px] uppercase tracking-wide opacity-50">task</div>
+						<div class="mb-1 text-[10px] uppercase tracking-wide opacity-70">task</div>
 						<div class="text-sm">
 							<MarkdownText text={selected.task ?? "No task recorded"} />
 						</div>
@@ -598,6 +624,7 @@ export function ActivityFeed({ events, sessions, selected, onSelectSession, onOp
 								}
 								sessions={sessions}
 								selectedId={selected?.id}
+								expandAll={expandAll}
 								onSelectSession={onSelectSession}
 								onOpenImage={onOpenImage}
 							/>

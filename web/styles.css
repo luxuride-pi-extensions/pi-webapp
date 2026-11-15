@@ -87,7 +87,7 @@ pre {
 }
 .thinking {
 	font-style: italic;
-	opacity: 0.55;
+	opacity: 0.8;
 }
 
 /* Session tree: each nested node owns a rail segment, and its row draws the
@@ -135,7 +135,7 @@ pre {
 }
 .hljs-comment,
 .hljs-quote {
-	color: color-mix(in oklch, var(--color-base-content) 45%, transparent);
+	color: color-mix(in oklch, var(--color-base-content) 62%, transparent);
 	font-style: italic;
 }
 .hljs-keyword,

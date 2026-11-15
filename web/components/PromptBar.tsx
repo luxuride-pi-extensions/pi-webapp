@@ -54,7 +54,7 @@ export function PromptBar({ target, onSend, disabled = false, onTakeOver, taking
 	if (leeched && target) {
 		return (
 			<div class="flex items-center gap-3 border-t border-base-300 bg-base-100 px-3 py-2 text-xs">
-				<span class="min-w-0 truncate opacity-50">
+				<span class="min-w-0 truncate opacity-70">
 					Leeched transcript — read only until it is resumed in a pi process.
 				</span>
 				{onTakeOver && (

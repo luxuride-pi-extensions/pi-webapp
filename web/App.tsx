@@ -107,7 +107,7 @@ function TopBar({
 				<span class={`size-1.5 rounded-full ${live ? "bg-success" : "bg-warning animate-pulse"}`} aria-hidden="true" />
 				{live ? "live" : status === "connecting" ? "connecting" : "reconnecting"}
 			</span>
-			<span class="hidden items-center gap-1.5 font-mono text-[11px] opacity-40 md:flex" aria-label="Dashboard totals">
+			<span class="hidden items-center gap-1.5 font-mono text-[11px] opacity-65 md:flex" aria-label="Dashboard totals">
 				<span>{sessions} sessions</span>
 				<span aria-hidden="true">·</span>
 				<span>{subagents} subagents</span>
@@ -147,8 +147,12 @@ function TopBar({
 					class={`btn btn-square btn-xs ${expandAll ? "btn-secondary" : "btn-ghost"}`}
 					onClick={onToggleExpand}
 					aria-pressed={expandAll}
-					aria-label={expandAll ? "Collapse subagents" : "Expand all sessions and subagents"}
-					title={expandAll ? "Collapse subagents (main sessions stay open)" : "Expand every session and subagent"}
+					aria-label={expandAll ? "Collapse everything" : "Expand all sessions, subagents and messages"}
+					title={
+						expandAll
+							? "Expanded: subagents, thinking and tool output are open"
+							: "Expand every session, subagent, thinking block and tool output"
+					}
 					data-testid="expand-all"
 				>
 					<svg class="size-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
@@ -234,7 +238,7 @@ function SessionHeader({
 						leech
 					</span>
 				)}
-				{subtitle && <span class="hidden min-w-0 truncate text-xs opacity-45 lg:inline">— {subtitle}</span>}
+				{subtitle && <span class="hidden min-w-0 truncate text-xs opacity-65 lg:inline">— {subtitle}</span>}
 				<div class="ml-auto flex shrink-0 items-center gap-1">
 					{canTakeOver && (
 						<button
@@ -289,7 +293,7 @@ function SessionHeader({
 					)}
 				</div>
 			</div>
-			<div class="mt-1 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[11px] opacity-45">
+			<div class="mt-1 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[11px] opacity-65">
 				<span class="min-w-0 max-w-[24rem] truncate" title={session.cwd ?? ""}>
 					{session.cwd ?? "—"}
 				</span>
@@ -371,7 +375,7 @@ function StartingSpawnList({ spawns, onCancel }: StartingSpawnListProps) {
 	if (!active) return null;
 	return (
 		<section class="border-t border-base-300 p-2" aria-label="Starting sessions">
-			<div class="flex items-center gap-1.5 px-1 pb-1 text-[10px] tracking-wide uppercase opacity-50">
+			<div class="flex items-center gap-1.5 px-1 pb-1 text-[10px] tracking-wide uppercase opacity-70">
 				<span class="loading loading-spinner loading-xs" aria-hidden="true" />
 				starting…
 			</div>
@@ -382,7 +386,7 @@ function StartingSpawnList({ spawns, onCancel }: StartingSpawnListProps) {
 							<div class="truncate font-mono text-[11px]" title={spawn.cwd}>
 								{cwdBasename(spawn.cwd)}
 							</div>
-							<div class="flex items-center gap-1.5 font-mono text-[10px] opacity-50">
+							<div class="flex items-center gap-1.5 font-mono text-[10px] opacity-70">
 								{typeof spawn.pid === "number" && <span>pid {spawn.pid}</span>}
 								<span class="ml-auto">{elapsedTime(spawn.startedAt, now)}</span>
 							</div>
@@ -727,7 +731,7 @@ export function App() {
 									const label = sessionName(node);
 									return (
 										<span key={node.id} class="flex shrink-0 items-center gap-1.5">
-											{index > 0 && <span class="opacity-50">/</span>}
+											{index > 0 && <span class="opacity-70">/</span>}
 											{last ? (
 												<span class="font-medium opacity-100" aria-current="page">
 													{label}
@@ -747,10 +751,11 @@ export function App() {
 								})}
 							</nav>
 							)}
-							<PluginPanels plugins={state?.plugins ?? []} session={selected} events={events} />
+							<PluginPanels plugins={state?.plugins ?? []} session={selected} events={events} expandAll={expandAll} />
 							<div class="flex min-h-0 flex-1">
 								<div class="min-h-0 min-w-0 flex-1">
 									<ActivityFeed
+										expandAll={expandAll}
 										events={events}
 										sessions={sessions}
 										selected={selected}

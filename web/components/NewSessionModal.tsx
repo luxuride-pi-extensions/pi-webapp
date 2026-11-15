@@ -123,7 +123,7 @@ export function NewSessionModal({ open, defaultCwd, startSession, onSpawned, onC
 							disabled={submitting}
 							onInput={(event) => setCwd(event.currentTarget.value)}
 						/>
-						<span class="text-[11px] opacity-50">Absolute path where the pi session runs.</span>
+						<span class="text-[11px] opacity-70">Absolute path where the pi session runs.</span>
 					</label>
 					<label class="flex flex-col gap-1">
 						<span class="text-xs font-medium">Initial prompt</span>
@@ -136,7 +136,7 @@ export function NewSessionModal({ open, defaultCwd, startSession, onSpawned, onC
 							disabled={submitting}
 							onInput={(event) => setPrompt(event.currentTarget.value)}
 						/>
-						<span class="text-[11px] opacity-50">Delivered as the first message once the session starts.</span>
+						<span class="text-[11px] opacity-70">Delivered as the first message once the session starts.</span>
 					</label>
 					<div class="grid gap-3 sm:grid-cols-2">
 						<label class="flex flex-col gap-1">

@@ -5,6 +5,7 @@ export interface PluginPanelsProps {
 	plugins: PluginInfo[];
 	session: SessionNode | null;
 	events: WebappEvent[];
+	expandAll?: boolean;
 }
 
 const PANEL_MESSAGE_SOURCE = "pi-webapp";
@@ -14,7 +15,7 @@ const PANEL_MESSAGE_SOURCE = "pi-webapp";
  * iframe from its own directory, so dashboard code stays independent of the
  * plugins a user happens to have installed.
  */
-export function PluginPanels({ plugins, session, events }: PluginPanelsProps) {
+export function PluginPanels({ plugins, session, events, expandAll = false }: PluginPanelsProps) {
 	const sessionEvents = useMemo(
 		() => (session ? events.filter((event) => event.sessionId === session.id).slice(-200) : []),
 		[session, events],
@@ -28,7 +29,7 @@ export function PluginPanels({ plugins, session, events }: PluginPanelsProps) {
 				plugin.panels.map((panel, index) => (
 					<PluginPanelFrame
 						key={`${plugin.id}/${panel.id}`}
-						defaultOpen={index === 0}
+						defaultOpen={expandAll || index === 0}
 						plugin={plugin}
 						panelId={panel.id}
 						title={panel.title}
@@ -99,7 +100,7 @@ function PluginPanelFrame({
 			<summary class="collapse-title flex items-center gap-2 text-xs font-semibold">
 				<span class="badge badge-ghost badge-xs">plugin</span>
 				{title}
-				<span class="font-mono text-[10px] font-normal opacity-50">{plugin.name}</span>
+				<span class="font-mono text-[10px] font-normal opacity-70">{plugin.name}</span>
 			</summary>
 			<div class="collapse-content pt-0">
 				{description && <p class="mb-1 text-[11px] opacity-60">{description}</p>}

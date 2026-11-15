@@ -118,7 +118,7 @@ export function SubagentRail({ session, sessions, events, onSelect }: SubagentRa
 			<header class="flex items-center gap-2 border-b border-base-300 px-3 py-2">
 				<h2 class="text-xs font-semibold tracking-wide uppercase opacity-70">Subagents</h2>
 				<span class="badge badge-ghost badge-xs">{items.length}</span>
-				<span class="ml-auto font-mono text-[10px] opacity-40">live</span>
+				<span class="ml-auto font-mono text-[10px] opacity-65">live</span>
 			</header>
 			<ul class="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-2">
 				{items.map(({ session: child, last, count }) => {
@@ -140,7 +140,7 @@ export function SubagentRail({ session, sessions, events, onSelect }: SubagentRa
 									)}
 									<span class="truncate text-sm font-medium">{name}</span>
 									<StatusBadge status={child.status} />
-									<span class="ml-auto font-mono text-[10px] opacity-40">
+									<span class="ml-auto font-mono text-[10px] opacity-65">
 										{last ? clock(last.timestamp) : ""}
 									</span>
 								</div>
@@ -150,7 +150,7 @@ export function SubagentRail({ session, sessions, events, onSelect }: SubagentRa
 										{truncate(preview)}
 									</p>
 								)}
-								<div class="mt-1 flex items-center gap-2 font-mono text-[10px] opacity-40">
+								<div class="mt-1 flex items-center gap-2 font-mono text-[10px] opacity-65">
 									<span>{count} events</span>
 									{last && <span class="truncate">{last.type}</span>}
 									<span class="ml-auto">open →</span>
