@@ -15,7 +15,7 @@
  * session. Everything here is best effort: any failure yields "unknown", never
  * an exception, and non-Linux platforms simply report no owners.
  */
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync, readlinkSync } from "node:fs";
 import { basename } from "node:path";
 /** Defensive caps so a hostile or huge `/proc` cannot stall a leech scan. */
 const MAX_PIDS = 8192;
@@ -146,5 +146,92 @@ export function scanPiSessionOwners() {
     for (const list of pids.values())
         list.sort((a, b) => a - b);
     return result;
+}
+/** `/proc/<pid>/stat` reports starttime in clock ticks; Linux uses 100 Hz. */
+const CLOCK_TICK_MS = 10;
+const PROCESS_CACHE_MS = 2_000;
+let processCache = null;
+function bootTimeMs() {
+    const stat = readText("/proc/stat", 64 * 1024);
+    if (!stat)
+        return null;
+    for (const line of stat.split("\n")) {
+        if (!line.startsWith("btime "))
+            continue;
+        const seconds = Number(line.slice("btime ".length).trim());
+        return Number.isFinite(seconds) ? seconds * 1000 : null;
+    }
+    return null;
+}
+function startTimeMs(pid) {
+    const stat = readText(`/proc/${pid}/stat`, 8 * 1024);
+    if (!stat)
+        return null;
+    // The command name is parenthesised and may contain spaces, so split after it.
+    const end = stat.lastIndexOf(")");
+    if (end < 0)
+        return null;
+    const fields = stat.slice(end + 1).trim().split(/\s+/);
+    // Fields after `comm` start at index 3 (state); starttime is field 22.
+    const ticks = Number(fields[19]);
+    return Number.isFinite(ticks) ? ticks * CLOCK_TICK_MS : null;
+}
+function workingDirectory(pid) {
+    try {
+        return readlinkSync(`/proc/${pid}/cwd`);
+    }
+    catch {
+        return null;
+    }
+}
+/**
+ * Lists live `pi` processes with their working directory and start time.
+ *
+ * `pi` does not export its session id into its own environment, so a process
+ * started outside this extension can only be matched to a transcript
+ * heuristically: same working directory, started when the session started.
+ * Cached briefly because callers ask once per session on every state request.
+ */
+export function scanPiProcesses() {
+    if (process.platform !== "linux")
+        return [];
+    const now = Date.now();
+    if (processCache && now - processCache.at < PROCESS_CACHE_MS)
+        return processCache.processes;
+    const processes = [];
+    const boot = bootTimeMs();
+    let entries = [];
+    try {
+        entries = readdirSync("/proc");
+    }
+    catch {
+        entries = [];
+    }
+    if (boot !== null) {
+        let seen = 0;
+        for (const entry of entries) {
+            if (seen >= MAX_PIDS)
+                break;
+            if (!/^\d+$/.test(entry))
+                continue;
+            const pid = Number(entry);
+            if (pid === process.pid)
+                continue;
+            seen += 1;
+            if (!isPiCommand(pid))
+                continue;
+            const cwd = workingDirectory(pid);
+            const started = startTimeMs(pid);
+            if (!cwd || started === null)
+                continue;
+            processes.push({ pid, cwd, startedAt: boot + started });
+        }
+    }
+    processCache = { at: now, processes };
+    return processes;
+}
+/** Test seam: forget the cached process list. */
+export function resetPiProcessCache() {
+    processCache = null;
 }
 //# sourceMappingURL=procs.js.map

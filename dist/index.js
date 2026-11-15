@@ -475,24 +475,31 @@ export default function piWebapp(pi) {
             await ensureBridge();
             publishModels();
             const title = str(sessionName, path.basename(cwd) || cwd);
-            const model = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined;
-            emit(makeEvent({
-                type: "session_started",
-                sessionId,
-                parentSessionId,
-                agentName,
-                isSubagent: Boolean(parentSessionId),
-                data: {
-                    title,
-                    cwd,
-                    model,
-                    sessionFile,
+            const announce = () => {
+                emit(makeEvent({
+                    type: "session_started",
+                    sessionId,
                     parentSessionId,
                     agentName,
                     isSubagent: Boolean(parentSessionId),
-                    spawnId: process.env[ENV.spawnId]?.trim() || undefined,
-                },
-            }));
+                    data: {
+                        title,
+                        cwd,
+                        model: ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined,
+                        sessionFile,
+                        parentSessionId,
+                        agentName,
+                        isSubagent: Boolean(parentSessionId),
+                        spawnId: process.env[ENV.spawnId]?.trim() || undefined,
+                    },
+                }));
+            };
+            announce();
+            // the dashboard keeps its sessions in memory: a restart drops them
+            bridge?.onReady(() => {
+                announce();
+                publishModels();
+            });
         }
         catch {
             // a dashboard failure must not prevent a session from starting

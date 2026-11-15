@@ -43,9 +43,13 @@ async function requestJson(url, init) {
 }
 async function createClientBridge(options, handlerRef, modelHandlerRef) {
     const baseUrl = `http://${options.host}:${options.port}`;
+    let readyHandler = null;
     const client = new WebappClient({
         baseUrl,
         instanceId: options.instanceId,
+        onReady() {
+            readyHandler?.();
+        },
         onModelCommand: async (command) => {
             const handler = modelHandlerRef.current;
             if (!handler)
@@ -85,6 +89,9 @@ async function createClientBridge(options, handlerRef, modelHandlerRef) {
         },
         setModelHandler(handler) {
             modelHandlerRef.current = handler;
+        },
+        onReady(handler) {
+            readyHandler = handler;
         },
         publishModels(models) {
             client.sendModels(models);
@@ -174,6 +181,9 @@ export async function createBridge(options) {
         },
         setModelHandler(handler) {
             server.setLocalModelHandler(handler);
+        },
+        onReady(_handler) {
+            // A primary owns the server: its state is already in this process.
         },
         publishModels(models) {
             server.setModels(models);

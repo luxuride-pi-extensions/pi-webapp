@@ -318,11 +318,9 @@ export function SessionTree({
 	const menuTakeoverPending = menuSession
 		? !!menuSession.takeoverSpawnId || takeoverBusyId === menuSession.id
 		: false;
+	// A busy owner is still takeable: the dashboard confirms before interrupting it.
 	const menuTakeover = menuSession
-		? canTakeOver &&
-			menuSession.source === "leech" &&
-			!menuSession.isSubagent &&
-			menuSession.ownerPid !== undefined
+		? canTakeOver && menuSession.source === "leech" && !menuSession.isSubagent
 		: false;
 
 	if (sessions.length === 0) {

@@ -954,9 +954,16 @@ export class WebappServer {
 				// is "working" is a property of the pi process that owns it, and it only
 				// counts as live while such a process is actually running it.
 				node.busy = info.busy;
-				if (info.pids.length === 0 && node.status === "running") {
-					node.status = "completed";
-					node.endedAt = node.endedAt ?? node.updatedAt;
+				if (info.pids.length === 0) {
+					if (node.status === "running") {
+						node.status = "completed";
+						node.endedAt = node.endedAt ?? node.updatedAt;
+					}
+				} else if (node.status !== "running") {
+					// A pi process is running this transcript, even if no instance of
+					// the extension inside it is attached to this dashboard.
+					node.status = "running";
+					delete node.endedAt;
 				}
 			} else {
 				delete node.ownerPid;

@@ -19,6 +19,11 @@ export interface BridgeRuntime {
 	emit(event: WebappEvent): void;
 	setPromptHandler(handler: LocalPromptHandler | null): void;
 	setModelHandler(handler: LocalModelHandler | null): void;
+	/**
+	 * Registers work that has to run whenever this instance (re)attaches to the
+	 * dashboard: a restarted server has forgotten the session otherwise.
+	 */
+	onReady(handler: () => void): void;
 	/** Tells the dashboard which models this instance can switch to. */
 	publishModels(models: readonly ModelInfo[]): void;
 	rescanLeech(dirs?: string[]): Promise<LeechStatus>;
@@ -72,9 +77,13 @@ async function createClientBridge(
 	modelHandlerRef: { current: LocalModelHandler | null },
 ): Promise<BridgeRuntime> {
 	const baseUrl = `http://${options.host}:${options.port}`;
+	let readyHandler: (() => void) | null = null;
 	const client = new WebappClient({
 		baseUrl,
 		instanceId: options.instanceId,
+		onReady() {
+			readyHandler?.();
+		},
 		onModelCommand: async (command: ModelCommand) => {
 			const handler = modelHandlerRef.current;
 			if (!handler) return { ok: false, error: "No model handler is registered" };
@@ -111,6 +120,9 @@ async function createClientBridge(
 		},
 		setModelHandler(handler: LocalModelHandler | null) {
 			modelHandlerRef.current = handler;
+		},
+		onReady(handler: () => void) {
+			readyHandler = handler;
 		},
 		publishModels(models: readonly ModelInfo[]) {
 			client.sendModels(models);
@@ -200,6 +212,9 @@ export async function createBridge(options: BridgeOptions): Promise<BridgeRuntim
 		},
 		setModelHandler(handler: LocalModelHandler | null) {
 			server.setLocalModelHandler(handler);
+		},
+		onReady(_handler: () => void) {
+			// A primary owns the server: its state is already in this process.
 		},
 		publishModels(models: readonly ModelInfo[]) {
 			server.setModels(models);

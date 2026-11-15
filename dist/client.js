@@ -137,6 +137,12 @@ export class WebappClient {
             this.reconnectDelayMs = RECONNECT_MIN_MS;
             this.setConnected(true);
             this.send({ type: "hello", role: "instance", instanceId: this.instanceId });
+            try {
+                this.options.onReady?.();
+            }
+            catch {
+                // announcing again must never break the reconnect
+            }
             void this.flush();
         });
         ws.on("message", (data) => {

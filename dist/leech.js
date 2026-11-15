@@ -6,12 +6,14 @@
  * Live in-process events remain authoritative in the server; leeched events are
  * always marked with source "leech" so consumers can prefer live data.
  */
-import { scanPiSessionOwners, sessionIdFromSessionFile } from "./procs.js";
+import { scanPiProcesses, scanPiSessionOwners, sessionIdFromSessionFile } from "./procs.js";
 import { existsSync } from "node:fs";
 import { open, readdir, stat as statFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { clearInterval, setInterval } from "node:timers";
 import { bool, makeEvent, num, str, truncate, WATCH_INTERVAL_MS, } from "./protocol.js";
+/** A session file appears within seconds of its `pi` process starting. */
+const OWNER_START_WINDOW_MS = 15_000;
 const DEFAULT_MAX_AGE_MS = 15 * 60 * 1000;
 const DEFAULT_REPLAY_LIMIT = 40;
 const MAX_SCAN_DEPTH = 4;
@@ -229,10 +231,37 @@ export class SessionLeech {
      * transcript ends inside a turn (so killing the owner would lose work).
      */
     sessionRuntime(sessionId) {
+        const pids = new Set(this.ownersBySession.get(sessionId) ?? []);
+        const state = this.stateFor(sessionId);
+        if (state) {
+            for (const pid of this.processPidsFor(state))
+                pids.add(pid);
+        }
         return {
-            pids: this.ownersBySession.get(sessionId) ?? [],
+            pids: [...pids].sort((a, b) => a - b),
             pending: this.pendingBySession.get(sessionId) ?? false,
         };
+    }
+    stateFor(sessionId) {
+        for (const state of this.files.values()) {
+            if (state.sessionId === sessionId)
+                return state;
+        }
+        return null;
+    }
+    /**
+     * `pi` does not put its session id in its own environment, so a process
+     * started outside this extension is matched by working directory and start
+     * time instead: a session file is created when its process starts.
+     */
+    processPidsFor(state) {
+        const cwd = state.header.cwd;
+        const startedAt = Date.parse(state.header.timestamp);
+        if (!cwd || !Number.isFinite(startedAt))
+            return [];
+        return scanPiProcesses()
+            .filter((proc) => proc.cwd === cwd && Math.abs(proc.startedAt - startedAt) <= OWNER_START_WINDOW_MS)
+            .map((proc) => proc.pid);
     }
     start() {
         if (this.timer)

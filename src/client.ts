@@ -14,6 +14,11 @@ export interface WebappClientOptions {
 	onCommand: (command: PromptCommand) => Promise<{ ok: boolean; error?: string }>;
 	onModelCommand?: (command: ModelCommand) => Promise<{ ok: boolean; error?: string }>;
 	onConnectionChange?: (connected: boolean) => void;
+	/**
+	 * Called every time the WebSocket is (re)established. The dashboard keeps its
+	 * state in memory, so a restarted server needs the session announced again.
+	 */
+	onReady?: () => void;
 }
 
 const RECONNECT_MIN_MS = 1000;
@@ -154,6 +159,11 @@ export class WebappClient {
 			this.reconnectDelayMs = RECONNECT_MIN_MS;
 			this.setConnected(true);
 			this.send({ type: "hello", role: "instance", instanceId: this.instanceId });
+			try {
+				this.options.onReady?.();
+			} catch {
+				// announcing again must never break the reconnect
+			}
 			void this.flush();
 		});
 		ws.on("message", (data: RawData) => {
