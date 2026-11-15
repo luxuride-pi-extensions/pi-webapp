@@ -25,6 +25,9 @@ const CHILD_FEED_TYPES = new Set<WebappEventType>([
 	"error",
 ]);
 const SUMMARY_DETAIL_LIMIT = 160;
+/** Placeholder tool output that carries no information. */
+const OUTPUT_TOGGLE_MIN = 200;
+const EMPTY_OUTPUT = /^\(?(no output|no result|empty|undefined|null|\{\}|\[\])\)?$/i;
 
 const SYSTEM_LABELS: Partial<Record<WebappEventType, string>> = {
 	session_started: "session started",
@@ -147,6 +150,7 @@ function OpenSessionButton({ id, name, onSelectSession }: { id: string; name: st
 }
 
 interface RenderProps {
+	selectedId?: string;
 	event: WebappEvent;
 	showSubagent: boolean;
 	sessions: SessionNode[];
@@ -180,29 +184,59 @@ function ClampedMarkdown({ text }: { text: string }) {
 }
 
 /** Whose words these are: the session's dashboard name, not a generic label. */
-function speakerFor(event: WebappEvent, sessions: SessionNode[]): string {
+function speakerFor(event: WebappEvent, sessions: SessionNode[], selectedId?: string): string {
+	// Inside a session's own view the header already says who is speaking.
+	if (selectedId && event.sessionId === selectedId) return "";
 	const session = sessions.find((candidate) => candidate.id === event.sessionId);
 	if (session) return sessionName(session);
 	return event.agentName ?? "agent";
 }
 
-function renderAssistant({ event, sessions }: RenderProps) {
+function oneLine(text: string, limit = 200): string {
+	const flat = text.replace(/\s+/g, " ").trim();
+	return flat.length > limit ? `${flat.slice(0, limit - 1)}…` : flat;
+}
+
+function HoverClock({ timestamp, class: className = "" }: { timestamp: number; class?: string }) {
+	return (
+		<time
+			class={`pointer-events-none font-mono text-[10px] tabular-nums opacity-0 transition-opacity group-hover:opacity-40 ${className}`}
+			title={new Date(timestamp).toLocaleString()}
+		>
+			{clock(timestamp)}
+		</time>
+	);
+}
+
+function renderAssistant({ event, sessions, selectedId }: RenderProps) {
 	const text = pickText(event, ["text", "message", "content"]);
 	const reasoning = pickString(event, ["reasoning", "thinking"]);
+	const bubble = text.trim().length > 0;
 	return (
-		<div class="chat chat-start">
-			<div class="chat-header mb-1 text-xs opacity-60">
-				{speakerFor(event, sessions)}
-				<time class="ml-2 font-mono opacity-70">{clock(event.timestamp)}</time>
-			</div>
-			<div class="chat-bubble max-w-[85%] bg-base-200 text-sm text-base-content">
-				<ClampedMarkdown text={text} />
+		<div class="group flex flex-col items-start gap-0.5">
+			<div
+				class={
+					bubble
+						? "max-w-[min(52rem,92%)] rounded-lg rounded-tl-sm bg-base-200/70 px-3 py-2 text-sm leading-relaxed"
+						: "py-0.5 text-xs"
+				}
+			>
+				{bubble && <ClampedMarkdown text={text} />}
 				{reasoning && (
-					<details class="mt-2 text-xs">
-						<summary class="cursor-pointer opacity-60">reasoning</summary>
-						<div class="thinking mt-1 whitespace-pre-wrap">{reasoning}</div>
+					<details class="mt-1 text-xs">
+						<summary class="flex cursor-pointer list-none items-baseline gap-1.5 opacity-30 transition-opacity hover:opacity-60">
+							<span class="shrink-0 text-[10px] uppercase tracking-wide">thinking</span>
+							<span class="line-clamp-1 min-w-0 flex-1 text-[11px] italic">{oneLine(reasoning, 140)}</span>
+						</summary>
+						<div class="thinking mt-1 whitespace-pre-wrap border-l border-base-300 pl-2 text-[11px] leading-relaxed opacity-60">
+							{reasoning}
+						</div>
 					</details>
 				)}
+			</div>
+			<div class="flex items-center gap-2 self-end">
+				<span class="text-[10px] opacity-25">{speakerFor(event, sessions, selectedId)}</span>
+				<HoverClock timestamp={event.timestamp} />
 			</div>
 		</div>
 	);
@@ -210,55 +244,59 @@ function renderAssistant({ event, sessions }: RenderProps) {
 
 function ToolHeader({
 	event,
-	sessions,
 	ok,
 	duration,
+	summary,
 }: {
 	event: WebappEvent;
-	sessions: SessionNode[];
 	ok?: boolean;
 	duration?: string;
+	summary?: string;
 }) {
 	const name = pickString(event, ["name", "toolName", "tool"]) || "tool";
+	const oneLine = (summary ?? "").replace(/\s+/g, " ").trim();
 	return (
-		<div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+		<div class="flex min-w-0 items-center gap-x-2">
 			{ok !== undefined && (
-				<span class={`font-mono font-bold ${ok ? "text-success" : "text-error"}`}>{ok ? "✓" : "✗"}</span>
+				<span class={`shrink-0 font-mono text-[11px] ${ok ? "text-success" : "text-error"}`} aria-label={ok ? "succeeded" : "failed"}>
+					{ok ? "✓" : "✗"}
+				</span>
 			)}
-			<span class="badge badge-ghost badge-xs font-mono">tool</span>
-			<span class="text-sm font-semibold">{name}</span>
-			{duration && <span class="badge badge-ghost badge-xs font-mono">{duration}</span>}
-			<span class="text-[10px] opacity-50">{speakerFor(event, sessions)}</span>
-			<time class="ml-auto shrink-0 font-mono text-[10px] opacity-40">{clock(event.timestamp)}</time>
+			<span class="shrink-0 font-mono text-[11px] font-semibold">{name}</span>
+			{oneLine && !EMPTY_OUTPUT.test(oneLine) && (
+				<span class="line-clamp-2 min-w-0 flex-1 break-words font-mono text-[11px] leading-snug opacity-45">
+					{oneLine}
+				</span>
+			)}
+			{duration && <span class="ml-auto shrink-0 font-mono text-[10px] tabular-nums opacity-30">{duration}</span>}
+			<HoverClock timestamp={event.timestamp} class={duration ? "" : "ml-auto"} />
 		</div>
 	);
 }
 
-function renderToolStart({ event, sessions }: RenderProps) {
+function renderToolStart({ event }: RenderProps) {
 	const summary = pickText(event, ["summary", "input", "args"]);
 	return (
-		<div class="rounded-md border border-base-300 bg-base-200/50 px-2 py-1 text-xs" data-testid="tool-card">
-			<ToolHeader event={event} sessions={sessions} />
-			{summary && (
-				<pre class="mt-1 max-h-32 overflow-y-auto font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-words opacity-70">
-					{summary}
-				</pre>
-			)}
+		<div class="group rounded-md bg-base-200/30 px-2 py-1" data-testid="tool-card">
+			<ToolHeader event={event} summary={summary} />
 		</div>
 	);
 }
 
-function renderToolEnd({ event, sessions }: RenderProps) {
+function renderToolEnd({ event }: RenderProps) {
 	const summary = pickText(event, ["summary", "result", "output", "detail", "error"]);
 	const ok = succeeded(event);
 	const duration = formatDuration(durationMs(event));
+	const useful = summary && !EMPTY_OUTPUT.test(summary);
 	return (
-		<div class="rounded-md border border-base-300 bg-base-200/50 px-2 py-1 text-xs" data-testid="tool-card">
-			<ToolHeader event={event} sessions={sessions} ok={ok} duration={duration} />
-			{summary && (
-				<details class="mt-1" open={summary.length <= SUMMARY_DETAIL_LIMIT}>
-					<summary class="cursor-pointer text-[10px] uppercase tracking-wide opacity-50">output</summary>
-					<pre class="mt-1 max-h-64 overflow-y-auto whitespace-pre-wrap font-mono text-[11px] opacity-80">
+		<div class="group rounded-md bg-base-200/30 px-2 py-1" data-testid="tool-card">
+			<ToolHeader event={event} ok={ok} duration={duration} summary={summary} />
+			{useful && summary.length > OUTPUT_TOGGLE_MIN && (
+				<details class="mt-0.5">
+					<summary class="cursor-pointer list-none text-[10px] uppercase tracking-wide opacity-30 hover:opacity-60">
+						▸ output
+					</summary>
+					<pre class="mt-1 max-h-64 overflow-y-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed opacity-70">
 						{summary}
 					</pre>
 				</details>
@@ -272,15 +310,16 @@ function renderSubagentSpawned({ event, sessions, onSelectSession }: RenderProps
 	const task = pickText(event, ["task", "prompt", "description"]);
 	const childId = resolveChildId(event, sessions);
 	return (
-		<div class="rounded-box border border-base-300 border-l-4 border-l-secondary bg-base-200 p-3">
-			<div class="flex flex-wrap items-center gap-2 text-sm">
-				<span class="badge badge-secondary badge-sm">subagent</span>
-				<span>
-					spawned <span class="font-semibold">{agent}</span>
+		<div class="group rounded-md border-l-2 border-secondary/60 bg-secondary/5 py-1.5 pl-2.5 pr-2">
+			<div class="flex min-w-0 items-center gap-2 text-xs">
+				<span class="size-1.5 shrink-0 rounded-full bg-secondary" aria-hidden="true" />
+				<span class="shrink-0 font-medium">{agent}</span>
+				<span class="shrink-0 opacity-40">started</span>
+				<span class="ml-auto flex shrink-0 items-center gap-2">
+					<HoverClock timestamp={event.timestamp} />
 				</span>
-				<time class="ml-auto font-mono text-[10px] opacity-40">{clock(event.timestamp)}</time>
 			</div>
-			{task && <p class="mt-1 whitespace-pre-wrap text-xs opacity-70">{task}</p>}
+			{task && <p class="mt-0.5 line-clamp-2 whitespace-pre-wrap text-[11px] leading-snug opacity-55">{task}</p>}
 			{childId && <OpenSessionButton id={childId} name={agent} onSelectSession={onSelectSession} />}
 		</div>
 	);
@@ -294,17 +333,20 @@ function renderSubagentCompleted({ event, sessions, onSelectSession }: RenderPro
 	const childId = resolveChildId(event, sessions);
 	return (
 		<div
-			class={`rounded-box border border-base-300 border-l-4 bg-base-200 p-3 ${
-				ok ? "border-l-success" : "border-l-error"
+			class={`group rounded-md border-l-2 py-1.5 pl-2.5 pr-2 ${
+				ok ? "border-success/60 bg-success/5" : "border-error/70 bg-error/5"
 			}`}
 		>
-			<div class="flex flex-wrap items-center gap-2 text-sm">
-				<span class={`badge badge-sm ${ok ? "badge-success" : "badge-error"}`}>{ok ? "completed" : "failed"}</span>
-				<span class="font-semibold">{agent}</span>
-				{duration && <span class="badge badge-ghost badge-xs font-mono">{duration}</span>}
-				<time class="ml-auto font-mono text-[10px] opacity-40">{clock(event.timestamp)}</time>
+			<div class="flex min-w-0 items-center gap-2 text-xs">
+				<span class={`size-1.5 shrink-0 rounded-full ${ok ? "bg-success" : "bg-error"}`} aria-hidden="true" />
+				<span class="shrink-0 font-medium">{agent}</span>
+				<span class="shrink-0 opacity-40">{ok ? "finished" : "failed"}</span>
+				{duration && <span class="shrink-0 font-mono text-[10px] opacity-35">{duration}</span>}
+				<span class="ml-auto flex shrink-0 items-center gap-2">
+					<HoverClock timestamp={event.timestamp} />
+				</span>
 			</div>
-			{summary && <p class="mt-1 whitespace-pre-wrap text-xs opacity-70">{summary}</p>}
+			{summary && <p class="mt-0.5 line-clamp-3 whitespace-pre-wrap text-[11px] leading-snug opacity-55">{summary}</p>}
 			{childId && <OpenSessionButton id={childId} name={agent} onSelectSession={onSelectSession} />}
 		</div>
 	);
@@ -359,32 +401,28 @@ function renderSystem({ event }: RenderProps) {
 	const label = SYSTEM_LABELS[event.type] ?? event.type;
 	const detail = pickString(event, ["title", "model", "cwd", "agentName"]) || event.agentName || "";
 	return (
-		<div class="flex items-center gap-2 px-2 py-0.5 text-[10px] uppercase tracking-wide opacity-45">
+		<div class="flex items-center gap-2 py-1 text-[10px] uppercase tracking-wide opacity-30">
 			<span class="h-px flex-1 bg-base-300" />
-			<span>
+			<span class="shrink-0">
 				{label}
-				{detail ? `: ${detail}` : ""}
+				{detail ? ` · ${detail}` : ""}
 			</span>
-			<time class="font-mono">{clock(event.timestamp)}</time>
 			<span class="h-px flex-1 bg-base-300" />
 		</div>
 	);
 }
 
-function EventRow({ event, showSubagent, sessions, onSelectSession, onOpenImage }: RenderProps) {
-	const renderProps: RenderProps = { event, showSubagent, sessions, onSelectSession, onOpenImage };
+function EventRow({ event, showSubagent, sessions, selectedId, onSelectSession, onOpenImage }: RenderProps) {
+	const renderProps: RenderProps = { event, showSubagent, sessions, selectedId, onSelectSession, onOpenImage };
 	let content;
 	switch (event.type) {
 		case "user_prompt":
 			content = (
-				<div class="chat chat-end">
-					<div class="chat-header mb-1 text-xs opacity-60">
-						operator
-						<time class="ml-2 font-mono opacity-70">{clock(event.timestamp)}</time>
-					</div>
-					<div class="chat-bubble chat-bubble-primary whitespace-pre-wrap text-sm">
+				<div class="group flex flex-col items-end gap-0.5">
+					<div class="max-w-[min(46rem,88%)] whitespace-pre-wrap rounded-lg rounded-tr-sm bg-primary px-3 py-2 text-sm leading-relaxed text-primary-content">
 						{pickText(event, ["text", "prompt", "message"])}
 					</div>
+					<HoverClock timestamp={event.timestamp} />
 				</div>
 			);
 			break;
@@ -465,6 +503,27 @@ export function ActivityFeed({ events, sessions, selected, onSelectSession, onOp
 		return rows.slice().sort((a, b) => a.timestamp - b.timestamp || a.id.localeCompare(b.id));
 	}, [events, selected]);
 
+	const finishedCalls = useMemo(() => {
+		const ids = new Set<string>();
+		for (const event of events) {
+			if (event.type === "tool_end") {
+				const id = pickString(event, ["toolCallId", "callId", "id"]);
+				if (id) ids.add(id);
+			}
+		}
+		return ids;
+	}, [events]);
+
+	const mine = useMemo(
+		() =>
+			visible.filter((event) => {
+				if (event.type !== "tool_start") return true;
+				const id = pickString(event, ["toolCallId", "callId", "id"]);
+				return !id || !finishedCalls.has(id);
+			}),
+		[visible, finishedCalls],
+	);
+
 	const lastVisibleId = visible.length > 0 ? visible[visible.length - 1]?.id : "";
 
 	useEffect(() => {
@@ -529,8 +588,8 @@ export function ActivityFeed({ events, sessions, selected, onSelectSession, onOp
 						</div>
 					</div>
 				) : (
-					<div class="flex flex-col gap-2">
-						{visible.map((event) => (
+					<div class="flex flex-col gap-1.5 pt-1">
+						{mine.map((event) => (
 							<EventRow
 								key={event.id}
 								event={event}
@@ -538,6 +597,7 @@ export function ActivityFeed({ events, sessions, selected, onSelectSession, onOp
 									!!selected && event.parentSessionId === selected.id && event.sessionId !== selected.id
 								}
 								sessions={sessions}
+								selectedId={selected?.id}
 								onSelectSession={onSelectSession}
 								onOpenImage={onOpenImage}
 							/>

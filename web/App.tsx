@@ -98,65 +98,94 @@ function TopBar({
 	const live = status === "open";
 	const dirs = leech?.dirs ?? [];
 	return (
-		<header class="flex flex-wrap items-center gap-3 border-b border-base-300 bg-base-200/80 px-4 py-2">
-			<div class="flex items-baseline gap-2">
-				<span class="text-base font-semibold tracking-tight">pi-webapp</span>
-				<span class="hidden text-[11px] opacity-50 sm:inline">live agent session dashboard</span>
-			</div>
-			<div class="flex items-center gap-1.5 text-xs" title={live ? "WebSocket connected" : "Reconnecting to the dashboard server"}>
-				<span class={`size-2 rounded-full ${live ? "bg-success" : "bg-warning animate-pulse"}`} aria-hidden="true" />
-				<span class="opacity-70">{live ? "live" : status === "connecting" ? "connecting" : "reconnecting"}</span>
-			</div>
-			<div class="flex items-center gap-1 font-mono text-[11px]">
-				<span class="badge badge-ghost badge-sm">sessions {sessions}</span>
-				<span class="badge badge-ghost badge-sm">subagents {subagents}</span>
-				<span class="badge badge-ghost badge-sm">events {events}</span>
-			</div>
-			{leech && leech.sessions > 0 && (
-				<div
-					class="tooltip tooltip-bottom"
-					data-tip={dirs.length > 0 ? dirs.join("\n") : "No leech directories configured"}
-				>
-					<span class="badge badge-info badge-sm cursor-help">leech {leech.sessions}</span>
-				</div>
-			)}
+		<header class="flex items-center gap-3 border-b border-base-300 bg-base-200/80 px-3 py-1.5">
+			<span class="text-sm font-semibold tracking-tight">pi-webapp</span>
+			<span
+				class="flex items-center gap-1.5 text-[11px] opacity-60"
+				title={live ? "WebSocket connected" : "Reconnecting to the dashboard server"}
+			>
+				<span class={`size-1.5 rounded-full ${live ? "bg-success" : "bg-warning animate-pulse"}`} aria-hidden="true" />
+				{live ? "live" : status === "connecting" ? "connecting" : "reconnecting"}
+			</span>
+			<span class="hidden items-center gap-1.5 font-mono text-[11px] opacity-40 md:flex" aria-label="Dashboard totals">
+				<span>{sessions} sessions</span>
+				<span aria-hidden="true">·</span>
+				<span>{subagents} subagents</span>
+				<span aria-hidden="true">·</span>
+				<span>{events} events</span>
+				{leech && leech.sessions > 0 && (
+					<span
+						class="cursor-help"
+						title={`${leech.sessions} leeched session file(s)\n${dirs.length > 0 ? dirs.join("\n") : "No leech directories configured"}`}
+					>
+						· {leech.sessions} leeched
+					</span>
+				)}
+			</span>
 			<div class="ml-auto flex items-center gap-1">
 				<button
 					type="button"
-					class="btn btn-primary btn-sm"
+					class="btn btn-primary btn-xs gap-1"
 					onClick={onNewSession}
 					disabled={!spawnEnabled}
 					title={spawnEnabled ? "Start a new pi session in a working directory" : SPAWN_DISABLED_HINT}
 				>
 					<svg
-						class="size-3.5"
+						class="size-3"
 						viewBox="0 0 16 16"
 						fill="none"
 						stroke="currentColor"
-						stroke-width="1.7"
+						stroke-width="1.8"
 						aria-hidden="true"
 					>
 						<path d="M8 3.25v9.5M3.25 8h9.5" stroke-linecap="round" />
 					</svg>
-					New session
+					New
 				</button>
 				<button
 					type="button"
-					class={`btn btn-xs gap-1 ${expandAll ? "btn-active btn-secondary" : "btn-ghost"}`}
+					class={`btn btn-square btn-xs ${expandAll ? "btn-secondary" : "btn-ghost"}`}
 					onClick={onToggleExpand}
 					aria-pressed={expandAll}
+					aria-label={expandAll ? "Collapse subagents" : "Expand all sessions and subagents"}
 					title={expandAll ? "Collapse subagents (main sessions stay open)" : "Expand every session and subagent"}
 					data-testid="expand-all"
 				>
-					<span aria-hidden="true">{expandAll ? "⤢" : "⤢"}</span>
-					{expandAll ? "collapse subagents" : "expand all"}
+					<svg class="size-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+						{expandAll ? (
+							<path d="M6 3v10M3 6l3-3 3 3M10 13V3m3 7-3 3-3-3" stroke-linecap="round" stroke-linejoin="round" />
+						) : (
+							<path d="M6 10 3 13M10 6l3-3M3 10v3h3M13 6V3h-3" stroke-linecap="round" stroke-linejoin="round" />
+						)}
+					</svg>
 				</button>
-				<button type="button" class="btn btn-ghost btn-xs" onClick={onRescan} disabled={scanning}>
-					{scanning && <span class="loading loading-spinner loading-xs" />}
-					Rescan
+				<button
+					type="button"
+					class="btn btn-square btn-ghost btn-xs"
+					onClick={onRescan}
+					disabled={scanning}
+					aria-label="Rescan session files"
+					title="Rescan session files for leeched sessions"
+				>
+					{scanning ? (
+						<span class="loading loading-spinner loading-xs" />
+					) : (
+						<svg class="size-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+							<path d="M13 8a5 5 0 1 1-1.6-3.7M13 2.5V5h-2.5" stroke-linecap="round" stroke-linejoin="round" />
+						</svg>
+					)}
 				</button>
-				<a class="btn btn-ghost btn-xs" href={REPO_URL} target="_blank" rel="noreferrer">
-					repo ↗
+				<a
+					class="btn btn-square btn-ghost btn-xs"
+					href={REPO_URL}
+					target="_blank"
+					rel="noreferrer"
+					aria-label="Open the pi-webapp repository"
+					title="github.com/luxuride-pi-extensions/pi-webapp"
+				>
+					<svg class="size-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+						<path d="M6 3H3v10h10v-3M9 3h4v4M13 3 7.5 8.5" stroke-linecap="round" stroke-linejoin="round" />
+					</svg>
 				</a>
 			</div>
 		</header>
@@ -191,125 +220,137 @@ function SessionHeader({
 	const name = sessionName(session);
 	const canTakeOver = session.source === "leech" && !session.isSubagent && !!onTakeOver;
 	const busy = takeoverBusy || !!session.takeoverSpawnId;
+	const subtitle = session.title && session.title !== name ? session.title : null;
+	const currentModel = session.model ?? "";
 	return (
-		<div class="border-b border-base-300 bg-base-100 px-4 py-3">
-			<div class="card card-border border-base-300 bg-base-200/50">
-				<div class="card-body gap-1 p-3">
-					<div class="flex flex-wrap items-center gap-2">
-						<h1 class="text-base font-semibold">{name}</h1>
-						<StatusBadge status={session.status} source={session.source} size="sm" />
-						{session.isSubagent && (
-							<span class="badge badge-secondary badge-outline badge-sm">
-								subagent of {parent ? sessionName(parent) : "parent"}
-							</span>
-						)}
-						{session.ownerPid !== undefined && (
-							<span
-								class={`badge badge-sm font-mono ${session.ownerBusy ? "badge-warning" : "badge-outline"}`}
-								title={
-									session.ownerBusy
-										? `This session is busy in pi pid ${session.ownerPid}`
-										: `This session is open in pi pid ${session.ownerPid}`
-								}
-							>
-								pid {session.ownerPid}
-								{session.ownerBusy ? " · busy" : ""}
-							</span>
-						)}
-						{canTakeOver && (
-							<button
-								type="button"
-								class="btn btn-primary btn-outline btn-xs gap-1"
-								disabled={busy}
-								onClick={() => onTakeOver?.(session)}
-								title="Resume this session in a new pi process and prompt it from here"
-								data-testid="takeover-button"
-							>
-								{busy ? <span class="loading loading-spinner loading-xs" /> : <span aria-hidden="true">↻</span>}
-								{busy ? "taking over…" : "take over"}
-							</button>
-						)}
-						{onRename && (
-							<button
-								type="button"
-								class="btn btn-ghost btn-xs"
-								onClick={() => onRename(session)}
-								title="Rename this session in the dashboard"
-								data-testid="rename-session"
-							>
-								rename
-							</button>
-						)}
-						{onRemove && (
-							<button
-								type="button"
-								class="btn btn-ghost btn-xs text-error/80 hover:bg-error/10"
-								onClick={() => onRemove(session)}
-								title="Remove this session from the dashboard"
-								data-testid="remove-session"
-							>
-								remove
-							</button>
-						)}
-						<span class="ml-auto font-mono text-[11px] opacity-50">
-							updated {relativeTime(session.updatedAt)}
-						</span>
-					</div>
-					{session.title && (
-						<p class="truncate text-sm opacity-70" title={session.title}>
-							{session.title}
-						</p>
+		<div class="border-b border-base-300 bg-base-100 px-4 py-2 shadow-[0_6px_12px_-12px_rgba(0,0,0,0.9)]">
+			<div class="flex min-w-0 items-center gap-2">
+				<StatusBadge status={session.status} size="xs" />
+				<h1 class="min-w-0 truncate text-sm font-semibold" title={session.id}>
+					{name}
+				</h1>
+				{session.source === "leech" && (
+					<span class="badge badge-ghost badge-xs font-mono" title="Leeched from a transcript — take it over to prompt it">
+						leech
+					</span>
+				)}
+				{subtitle && <span class="hidden min-w-0 truncate text-xs opacity-45 lg:inline">— {subtitle}</span>}
+				<div class="ml-auto flex shrink-0 items-center gap-1">
+					{canTakeOver && (
+						<button
+							type="button"
+							class="btn btn-primary btn-outline btn-xs gap-1"
+							disabled={busy}
+							onClick={() => onTakeOver?.(session)}
+							title="Resume this session in a new pi process and prompt it from here"
+							data-testid="takeover-button"
+						>
+							{busy ? <span class="loading loading-spinner loading-xs" /> : <span aria-hidden="true">↻</span>}
+							{busy ? "taking over…" : "take over"}
+						</button>
 					)}
-					<div class="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[11px] opacity-60">
-						<span class="truncate" title={session.cwd ?? ""}>
-							cwd {session.cwd ?? "—"}
-						</span>
-						{models.length > 0 && onSwitchModel && session.source !== "leech" ? (
-							<label class="flex items-center gap-1">
-								model
-								<select
-									class="select select-xs w-auto max-w-[16rem] font-mono text-[11px]"
-									value={session.model ?? ""}
-									disabled={modelBusy}
-									onChange={(changeEvent) => {
-										const [provider, ...rest] = String(changeEvent.currentTarget.value).split("/");
-										const modelId = rest.join("/");
-										if (provider && modelId) onSwitchModel(provider, modelId);
-									}}
-									title="Switch the model for this session"
-									data-testid="model-select"
-								>
-									{!session.model && <option value="">choose…</option>}
-									{[...new Set(models.map((model) => model.provider))].map((provider) => (
-										<optgroup key={provider} label={provider}>
-											{models
-												.filter((model) => model.provider === provider)
-												.map((model) => (
-													<option key={`${model.provider}/${model.id}`} value={`${model.provider}/${model.id}`}>
-														{model.name ?? model.id}
-													</option>
-												))}
-										</optgroup>
-									))}
-								</select>
-								{modelBusy && <span class="loading loading-spinner loading-xs" />}
-							</label>
-						) : (
-							<span>model {session.model ?? "—"}</span>
-						)}
-						<span>started {session.startedAt ? relativeTime(session.startedAt) : "—"}</span>
-						{session.isSubagent && parent && (
-							<button type="button" class="link link-primary" onClick={() => onSelect(parent.id)}>
-								← Back to Parent
-							</button>
-						)}
-					</div>
+					{(onRename || onRemove) && (
+						<details class="dropdown dropdown-end">
+							<summary
+								class="btn btn-square btn-ghost btn-xs list-none"
+								aria-label="Session actions"
+								title="Session actions"
+								data-testid="session-actions"
+							>
+								<span aria-hidden="true">⋯</span>
+							</summary>
+							<ul class="menu dropdown-content z-30 mt-1 w-44 rounded-box border border-base-300 bg-base-100 p-1 text-xs shadow">
+								{onRename && (
+									<li>
+										<button
+											type="button"
+											class="justify-start"
+											onClick={() => onRename(session)}
+											data-testid="rename-session"
+										>
+											Rename…
+										</button>
+									</li>
+								)}
+								{onRemove && (
+									<li>
+										<button
+											type="button"
+											class="justify-start text-error"
+											onClick={() => onRemove(session)}
+											data-testid="remove-session"
+										>
+											Remove session…
+										</button>
+									</li>
+								)}
+							</ul>
+						</details>
+					)}
 				</div>
+			</div>
+			<div class="mt-1 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[11px] opacity-45">
+				<span class="min-w-0 max-w-[24rem] truncate" title={session.cwd ?? ""}>
+					{session.cwd ?? "—"}
+				</span>
+				{models.length > 0 && onSwitchModel && session.source !== "leech" ? (
+					<label class="flex items-center gap-1" title="Switch the model for this session">
+						<select
+							class="select select-xs w-auto max-w-[15rem] border-base-300 font-mono text-[11px]"
+							value={currentModel}
+							disabled={modelBusy}
+							onChange={(changeEvent) => {
+								const [provider, ...rest] = String(changeEvent.currentTarget.value).split("/");
+								const modelId = rest.join("/");
+								if (provider && modelId) onSwitchModel(provider, modelId);
+							}}
+							data-testid="model-select"
+						>
+							{!currentModel && <option value="">choose model…</option>}
+							{[...new Set(models.map((model) => model.provider))].map((provider) => (
+								<optgroup key={provider} label={provider}>
+									{models
+										.filter((model) => model.provider === provider)
+										.map((model) => (
+											<option key={`${model.provider}/${model.id}`} value={`${model.provider}/${model.id}`}>
+												{model.name ?? model.id}
+											</option>
+										))}
+								</optgroup>
+							))}
+						</select>
+						{modelBusy && <span class="loading loading-spinner loading-xs" />}
+					</label>
+				) : (
+					currentModel && <span class="truncate">{currentModel}</span>
+				)}
+				<span title={session.startedAt ? new Date(session.startedAt).toLocaleString() : undefined}>
+					started {session.startedAt ? relativeTime(session.startedAt) : "—"}
+				</span>
+				{session.ownerPid !== undefined && (
+					<span
+						class={session.ownerBusy ? "text-warning" : ""}
+						title={
+							session.ownerBusy
+								? `This session is busy in pi pid ${session.ownerPid}`
+								: `This session is open in pi pid ${session.ownerPid}`
+						}
+					>
+						pid {session.ownerPid}
+					</span>
+				)}
+				{onSwitchModel !== undefined && session.source !== "leech" && models.length === 0 && (
+					<span class="hidden sm:inline" title="No pi instance reported its models yet">
+						no models reported
+					</span>
+				)}
+				<span class="ml-auto" title="Last activity">
+					updated {relativeTime(session.updatedAt)}
+				</span>
 			</div>
 		</div>
 	);
 }
-
 interface StartingSpawnListProps {
 	spawns: SpawnRecord[];
 	onCancel: (spawnId: string) => void;
@@ -629,7 +670,7 @@ export function App() {
 				onToggleExpand={toggleExpand}
 			/>
 			<div class="flex min-h-0 flex-1">
-				<aside class="w-80 shrink-0 overflow-y-auto border-r border-base-300 bg-base-200">
+				<aside class="w-72 shrink-0 overflow-y-auto border-r border-base-300 bg-base-200">
 					<SessionTree
 						sessions={sessions}
 						selectedSessionId={selected?.id ?? null}
@@ -669,13 +710,18 @@ export function App() {
 								onTakeOver={handleTakeOver}
 								onRemove={requestRemove}
 								onRename={requestRename}
+								onSwitchModel={(provider, modelId) => void handleSwitchModel(selected, provider, modelId)}
+								models={models}
+								modelBusy={modelBusyId === selected.id}
 								takeoverBusy={takeoverBusyId === selected.id}
 							/>
+							{selected.isSubagent && (
 							<nav
 								aria-label="Breadcrumb"
-								class="flex items-center gap-1.5 overflow-x-auto border-b border-base-300 px-4 py-1 text-[11px] opacity-70"
+								class="flex items-center gap-1 overflow-x-auto border-b border-base-300 bg-base-200/40 px-4 py-1 text-[11px] opacity-60"
 								data-testid="breadcrumb"
 							>
+								<span class="shrink-0 opacity-70" aria-hidden="true">↳</span>
 								{trail.map((node, index) => {
 									const last = index === trail.length - 1;
 									const label = sessionName(node);
@@ -700,6 +746,7 @@ export function App() {
 									);
 								})}
 							</nav>
+							)}
 							<PluginPanels plugins={state?.plugins ?? []} session={selected} events={events} />
 							<div class="flex min-h-0 flex-1">
 								<div class="min-h-0 min-w-0 flex-1">
@@ -711,12 +758,14 @@ export function App() {
 										onOpenImage={setLightbox}
 									/>
 								</div>
-								<SubagentRail
-									session={selected}
-									sessions={sessions}
-									events={events}
-									onSelect={selectSession}
-								/>
+								{sessions.some((node) => node.parentSessionId === selected.id) && (
+									<SubagentRail
+										session={selected}
+										sessions={sessions}
+										events={events}
+										onSelect={selectSession}
+									/>
+								)}
 							</div>
 						</>
 					) : (
@@ -729,7 +778,12 @@ export function App() {
 							</div>
 						</div>
 					)}
-					<PromptBar target={selected} onSend={handleSend} />
+					<PromptBar
+						target={selected}
+						onSend={handleSend}
+						onTakeOver={handleTakeOver}
+						takingOver={takeoverBusyId === selected?.id}
+					/>
 				</main>
 			</div>
 			{renameTarget && (

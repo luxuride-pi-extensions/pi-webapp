@@ -25,9 +25,10 @@ export function PluginPanels({ plugins, session, events }: PluginPanelsProps) {
 	return (
 		<section class="flex flex-col gap-2 px-4 pt-3" data-testid="plugin-panels">
 			{plugins.map((plugin) =>
-				plugin.panels.map((panel) => (
+				plugin.panels.map((panel, index) => (
 					<PluginPanelFrame
 						key={`${plugin.id}/${panel.id}`}
+						defaultOpen={index === 0}
 						plugin={plugin}
 						panelId={panel.id}
 						title={panel.title}
@@ -52,6 +53,7 @@ function PluginPanelFrame({
 	description,
 	session,
 	events,
+	defaultOpen,
 }: {
 	plugin: PluginInfo;
 	panelId: string;
@@ -61,6 +63,7 @@ function PluginPanelFrame({
 	description?: string;
 	session: SessionNode;
 	events: WebappEvent[];
+	defaultOpen?: boolean;
 }) {
 	const frameRef = useRef<HTMLIFrameElement | null>(null);
 
@@ -87,8 +90,8 @@ function PluginPanelFrame({
 
 	return (
 		<details
-			class="collapse-arrow collapse rounded-box border border-base-300 bg-base-200/40"
-			open
+			class="collapse-arrow collapse rounded-md border border-base-300/60 bg-base-200/30"
+			open={defaultOpen}
 			data-testid="plugin-panel"
 			data-plugin={plugin.id}
 			data-panel={panelId}

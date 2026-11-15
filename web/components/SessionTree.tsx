@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "preact/hooks";
 import type { SessionNode, SpawnRecord } from "../../src/protocol.js";
 import { sessionName } from "../format.js";
-import { StatusBadge } from "./StatusBadge";
 
 export interface SessionTreeProps {
 	sessions: SessionNode[];
@@ -125,13 +124,21 @@ function TreeRow({
 	const spawnId = session.spawnId;
 	const spawnActive = spawnId ? activeSpawnIds.has(spawnId) : false;
 	const takeoverPending = !!session.takeoverSpawnId || takeoverBusyId === session.id;
+	const rowTitle = [
+		name,
+		session.status,
+		session.source === "leech" ? "leeched" : "",
+		session.ownerPid !== undefined ? `pid ${session.ownerPid}${session.ownerBusy ? " (busy)" : ""}` : "",
+		spawnId ? "started from the dashboard" : "",
+		session.title && session.title !== name ? session.title : "",
+	]
+		.filter(Boolean)
+		.join(" · ");
 	return (
 		<div class="tree-node" data-testid="session-row" data-session-id={session.id}>
 			<div
-				class={`tree-line group flex items-start gap-0.5 rounded-lg border pr-1 transition-colors ${
-					selected
-						? "border-primary/40 bg-primary/15"
-						: "border-transparent hover:border-base-300 hover:bg-base-300/50"
+				class={`tree-line group flex items-center gap-0.5 rounded-md pr-1 transition-colors ${
+					selected ? "bg-primary/15" : "hover:bg-base-300/60"
 				}`}
 				onContextMenu={(event) => {
 					event.preventDefault();
@@ -139,10 +146,11 @@ function TreeRow({
 					onContextMenu(session, event.clientX, event.clientY);
 				}}
 				data-testid="session-row-body"
+				title={rowTitle}
 			>
 				<button
 					type="button"
-					class="mt-2 flex size-5 shrink-0 items-center justify-center rounded text-[10px] opacity-50 transition hover:bg-base-300 hover:opacity-100 disabled:opacity-20"
+					class="flex size-5 shrink-0 items-center justify-center rounded text-[10px] opacity-40 transition hover:bg-base-300 hover:opacity-100 disabled:opacity-0"
 					onClick={() => onToggle(session.id)}
 					aria-label={expanded ? `Collapse ${name}` : `Expand ${name}`}
 					aria-expanded={expanded}
@@ -155,62 +163,40 @@ function TreeRow({
 				</button>
 				<button
 					type="button"
-					class="flex min-w-0 flex-1 flex-col gap-0.5 py-1.5 pr-1 text-left"
+					class="flex min-w-0 flex-1 items-center gap-1.5 py-1 pr-1 text-left"
 					onClick={() => onSelect(session.id)}
 					aria-current={selected ? "true" : undefined}
 				>
-					<span class="flex min-w-0 items-center gap-1.5">
-						<span
-							class="size-2 shrink-0 rounded-full"
-							style={{ backgroundColor: agentColor(name) }}
-							aria-hidden="true"
-						/>
-						<span class="truncate text-sm font-medium" title={name}>
-							{name}
-						</span>
-						<StatusBadge status={session.status} source={session.source} />
-						{spawnId && (
-							<span class="badge badge-ghost badge-xs font-mono" title="Started from the dashboard">
-								dashboard
-							</span>
-						)}
-						{session.ownerPid !== undefined && (
-							<span
-								class={`badge badge-xs font-mono ${session.ownerBusy ? "badge-warning" : "badge-outline"}`}
-								title={
-									session.ownerBusy
-										? `Session is busy in pi pid ${session.ownerPid}`
-										: `Session is open in pi pid ${session.ownerPid}`
-								}
-							>
-								pid {session.ownerPid}
-							</span>
-						)}
-						{hasChildren && (
-							<span class="ml-auto badge badge-ghost badge-xs" title={`${children.length} subagent(s)`}>
-								{children.length}
-							</span>
-						)}
+					<span class="size-1.5 shrink-0 rounded-full" style={{ backgroundColor: agentColor(name) }} aria-hidden="true" />
+					<span class={`truncate text-[13px] ${session.isSubagent ? "font-normal" : "font-medium"}`}>{name}</span>
+					{session.status === "running" && (
+						<span class="size-1.5 shrink-0 animate-pulse rounded-full bg-success" aria-label="running" />
+					)}
+					{session.status === "completed" && (
+					<span class="shrink-0 text-[10px] text-success/50" aria-label="completed">
+						✓
 					</span>
-					<span class="flex min-w-0 items-center gap-2 text-[11px] leading-tight opacity-60">
-						<span class="truncate" title={session.title ?? ""}>
-							{session.title ?? "untitled"}
+				)}
+					{session.status === "failed" && (
+						<span class="shrink-0 text-[10px] text-error" aria-label="failed">
+							✕
 						</span>
-						<time class="ml-auto shrink-0 font-mono" title={new Date(session.startedAt).toLocaleString()}>
+					)}
+					{hasChildren && !expanded && (
+						<span class="shrink-0 font-mono text-[10px] opacity-40" title={`${children.length} subagent(s)`}>
+							+{children.length}
+						</span>
+					)}
+					<span class="ml-auto flex shrink-0 items-center gap-1">
+						{takeoverPending && <span class="loading loading-spinner loading-xs" title="Resuming this session…" />}
+						{spawnActive && (
+							<span class="size-1 rounded-full bg-info" title="Started from the dashboard" aria-hidden="true" />
+						)}
+						<time class="font-mono text-[10px] tabular-nums opacity-35">
 							{relativeTime(session.updatedAt || session.startedAt)}
 						</time>
 					</span>
 				</button>
-				{takeoverPending && (
-					<span class="mt-2 self-start" title="Resuming this session…">
-						<span class="loading loading-spinner loading-xs" />
-					</span>
-				)}
-				{spawnActive && (
-					<span class="mt-2 shrink-0 text-[10px] opacity-40" title="Started from the dashboard">
-						●
-					</span>
-				)}
 			</div>
 			{expanded && (
 				<div class="tree-children" data-testid="subagent-tree">
@@ -345,7 +331,7 @@ export function SessionTree({
 
 	return (
 		<div class="flex min-h-0 flex-col">
-			<div class="flex flex-col gap-1.5 border-b border-base-300 p-2">
+			<div class="flex flex-col gap-1 border-b border-base-300 px-2 py-1.5">
 				<label class="input input-xs flex w-full items-center gap-1 rounded-md border-base-300 bg-base-200">
 					<span class="text-[11px] opacity-50" aria-hidden="true">
 						⌕
@@ -370,12 +356,12 @@ export function SessionTree({
 						</button>
 					)}
 				</label>
-				<div class="flex items-center gap-1 text-[11px]">
+				<div class="flex items-center gap-0.5 text-[11px]">
 					{(["all", "running"] as const).map((value) => (
 						<button
 							key={value}
 							type="button"
-							class={`btn btn-xs rounded-md ${statusFilter === value ? "btn-primary" : "btn-ghost"}`}
+							class={`btn btn-ghost btn-xs h-6 min-h-0 px-2 font-normal ${statusFilter === value ? "bg-base-300 text-base-content" : "opacity-50"}`}
 							aria-pressed={statusFilter === value}
 							onClick={() => setStatusFilter(value)}
 							data-testid="status-filter"
@@ -383,7 +369,7 @@ export function SessionTree({
 							{value}
 						</button>
 					))}
-					<span class="ml-auto font-mono opacity-50">{countNodes(filtered)}</span>
+					<span class="ml-auto font-mono text-[10px] opacity-35">{countNodes(filtered)}</span>
 				</div>
 			</div>
 			<nav aria-label="Sessions" class="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto p-2" data-testid="session-tree">
