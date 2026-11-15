@@ -51,7 +51,7 @@ export function isLoopbackUrl(url) {
         return false;
     }
 }
-function defaultPiBin() {
+export function defaultPiBin() {
     const fromEnv = process.env[ENV.piBin];
     if (fromEnv && fromEnv.trim())
         return fromEnv.trim();

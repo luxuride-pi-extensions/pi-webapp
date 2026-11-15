@@ -12,6 +12,7 @@ A browser dashboard for [pi](https://github.com/earendil-works/pi) coding-agent 
 - **Range video streaming** — Playwright `.webm` recordings are served with HTTP `Range` support, so the browser can seek without downloading the whole clip.
 - **Multi-instance dashboard** — run several `pi` processes at once; the first one binds `8787`, the rest register as instances and route prompts over the WebSocket.
 - **Standalone daemon** — `pi-webapp serve` runs the dashboard without a `pi` process: always-on, leeching session files, accepting `pi` instances as they join, and starting new sessions from the browser.
+- **Autostart** — installing the package registers a systemd user service (falling back to the first `pi` run when npm skips install scripts), so the dashboard is already up at login and keeps running after every `pi` exits.
 - **Session leeching** — pi sessions started *without* the extension (plain CLI runs, older versions) are tailed straight from `~/.pi/agent/sessions` and appear as read-only feed entries.
 - **Agent tools** — two tools agents can call on their own: `post_work_state` (milestone + screenshot/recording) and `capture_playwright_snapshot` (headless browser screenshot of a dev server).
 - **Local-first UI** — Preact frontend, Tailwind CSS v4 and daisyUI, dark by default, no external fonts, scripts or telemetry.
@@ -43,7 +44,9 @@ Requires **Node.js >= 22.19**. Published packages ship compiled assets in `dist/
 pi
 ```
 
-Start a session or send it a prompt, then open **http://127.0.0.1:8787** in a browser. That is the whole setup: the dashboard lives inside `pi`, so it is there whenever you are working. To keep it running with no `pi` process, use `/webapp daemon start` (see [Standalone daemon](#standalone-daemon)).
+Start a session or send it a prompt, then open **http://127.0.0.1:8787** in a browser. That is the whole setup: the dashboard lives inside `pi`, so it is there whenever you are working.
+
+Installing the package also **enables an always-on dashboard**: on a Linux machine with a systemd user session the installer registers `pi-webapp.service`, so the dashboard is already running at your next login and every `pi` process joins it instead of starting its own. See [Autostart](#autostart-systemd-user-service) for what that writes, how to uninstall it, and how to opt out.
 
 ### Commands
 
@@ -55,6 +58,8 @@ Inside `pi`:
 | `/webapp daemon start [port]` | Start a detached dashboard that keeps running after `pi` exits (default port from `PI_WEBAPP_PORT`, else `8787`). Prints the URL; safe to run twice. |
 | `/webapp daemon status` | Is a daemon running, on which URL, with which pid. |
 | `/webapp daemon stop` | Gracefully stop the daemon started by `pi-webapp` (pid file, `SIGTERM`, then `SIGKILL` after 6s). |
+| `/webapp daemon install` | Write `~/.config/systemd/user/pi-webapp.service` for this install, enable it and start it (idempotent). |
+| `/webapp daemon uninstall` | Disable, stop and delete the unit, and opt out of automatic setup until you install it again. |
 
 ## Standalone daemon
 
@@ -96,44 +101,68 @@ On `SIGINT`, `SIGTERM` or `SIGHUP` it closes the WebSockets, kills the `pi` proc
 | `--leech-dir <dir>` | `$PI_WEBAPP_LEECH_DIR` | Extra session directory to leech. Repeatable. |
 | `--no-leech` | leeching on | Do not tail `pi` session files. |
 | `--no-spawn` | spawning on for loopback | Do not allow sessions to be started from the dashboard. |
+| `--wait` | off | Keep retrying instead of exiting while the port is busy (used by the systemd unit). |
+| `--retry-ms <ms>` | `2000` | Delay between bind retries with `--wait`. |
 | `-v, --version` | | Print the package version and exit. |
 | `-h, --help` | | Print usage and exit. |
 
 The daemon reads the same environment as extension mode (`PI_WEBAPP_PORT`, `PI_WEBAPP_HOST`, `PI_WEBAPP_CACHE_DIR`, `PI_WEBAPP_LEECH`, `PI_WEBAPP_LEECH_DIR`, `PI_WEBAPP_SPAWN`, `PI_WEBAPP_PI_BIN`, `PI_WEBAPP_SESSION_DIR`, `PI_WEBAPP_PLAYWRIGHT`); flags win over the environment.
 
-### systemd user unit
+### Autostart (systemd user service)
 
-Save as `~/.config/systemd/user/pi-webapp.service`:
+Installing the package enables an always-on dashboard; there is no extra command to run.
+
+- **`npm install`** (lifecycle scripts allowed) → `scripts/postinstall.mjs` writes the unit, enables it and starts it.
+- **`pi install …`** (npm 12 blocks install scripts by default, and `pi install` uses `--omit=dev`) → the extension performs the same convergence on the first `session_start`, so the first `pi` you run after installing reports the autostart and the unit appears.
+- **`/webapp daemon install`** → same thing on demand, e.g. after moving the checkout or changing the port.
+
+From then on the service starts at login, restarts on failure, keeps the dashboard alive after `pi` exits, and every `pi` process (including subagents) joins it as a client instead of binding the port. If something already owns the port, the service runs `serve --wait` and takes the dashboard over as soon as the port frees up — no restart loop, no lost events.
+
+```bash
+systemctl --user status pi-webapp         # enabled/active state
+journalctl --user -u pi-webapp -f         # dashboard logs
+systemctl --user disable --now pi-webapp  # stop it, keep the unit
+loginctl enable-linger "$USER"            # also start at boot, not only at login
+```
+
+| Command | Effect |
+| --- | --- |
+| `/webapp daemon install` | (Re)write the unit from the current install, enable and start it. |
+| `/webapp daemon uninstall` | Disable, stop and delete the unit, then opt out: `~/.pi/cache/pi-webapp/autostart.json` remembers it so a later `pi` does not re-add it. |
+| `/webapp daemon status` | Daemon plus systemd service state. |
+
+Opting out without uninstalling: `PI_WEBAPP_AUTOSTART=0` disables both the postinstall and the `session_start` fallback. `PI_WEBAPP_SKIP_AUTOSTART=1` disables the postinstall only. `PI_WEBAPP_SYSTEMD_UNIT=name.service` overrides the unit name (tests use this).
+
+The generated unit looks like this (paths and port come from the install):
 
 ```ini
 [Unit]
-Description=pi-webapp dashboard
-After=network.target
+Description=pi-webapp dashboard for pi coding-agent sessions
+Documentation=https://github.com/luxuride-pi-extensions/pi-webapp
+After=default.target
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
-WorkingDirectory=%h/projects
-Environment=PI_WEBAPP_PI_BIN=%h/.pi/agent/bin/pi
-ExecStart=/usr/bin/env npx --yes pi-webapp serve --port 8787
+WorkingDirectory=/home/you
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+Environment=PI_WEBAPP_HOST=127.0.0.1
+Environment=PI_WEBAPP_PORT=8787
+Environment=PI_WEBAPP_PI_BIN=/home/you/.pi/agent/bin/pi
+ExecStart=/usr/bin/node /path/to/pi-webapp/bin/pi-webapp.mjs serve --wait --host 127.0.0.1 --port 8787
 Restart=on-failure
-RestartSec=2
+RestartSec=3
 
 [Install]
 WantedBy=default.target
 ```
 
-```bash
-systemctl --user daemon-reload
-systemctl --user enable --now pi-webapp
-loginctl enable-linger "$USER"   # keep it running without an open login session
-```
-
-Use `ExecStart=/usr/bin/node /path/to/pi-webapp/bin/pi-webapp.mjs serve` when the dashboard lives in a checkout, and `journalctl --user -u pi-webapp -f` to watch it.
+**Not Linux / no systemd?** Autostart is skipped with a note (never an install failure). Run the same command under your own supervisor, for example launchd on macOS (`~/Library/LaunchAgents/com.example.pi-webapp.plist` with `ProgramArguments` of the `ExecStart` line above and `RunAtLoad`/`KeepAlive`), a Windows scheduled task, or a container entrypoint.
 
 ### tmux
 
 ```bash
-tmux new-session -d -s pi-webapp 'npx pi-webapp serve --cwd ~/projects'
+tmux new-session -d -s pi-webapp 'node /path/to/pi-webapp/bin/pi-webapp.mjs serve --cwd ~/projects'
 tmux attach -t pi-webapp        # Ctrl-b d to detach again
 ```
 
@@ -187,6 +216,9 @@ The extension is configured through environment variables — extension mode has
 | `PI_WEBAPP_PLAYWRIGHT` | *(auto-detected)* | Path to the Playwright CLI used by `capture_playwright_snapshot`. |
 | `PI_WEBAPP_SPAWN` | `1` | `0`, `false` or `off` disables starting sessions from the dashboard. |
 | `PI_WEBAPP_PI_BIN` | *(auto-detected)* | `pi` executable used for sessions started from the dashboard. |
+| `PI_WEBAPP_AUTOSTART` | `1` | `0`, `false` or `off` disables the systemd autostart integration (postinstall and the `session_start` fallback). |
+| `PI_WEBAPP_SKIP_AUTOSTART` | *(unset)* | `1` skips only the npm `postinstall` autostart step. |
+| `PI_WEBAPP_SYSTEMD_UNIT` | `pi-webapp.service` | Overrides the systemd unit name (the test suite uses a throwaway unit). |
 | `PI_WEBAPP_SESSION_DIR` | *(unset)* | Adds `--session-dir <dir>` to sessions started from the dashboard. |
 | `PI_WEBAPP_SPAWN_ID` | *(set by the server)* | Spawn id handed to a `pi` process started from the dashboard; echoed back in its `session_started` event. |
 | `PI_WEBAPP_PARENT_SESSION_ID` | *(set by the extension)* | Parent session id handed to a spawned child `pi` process. |
@@ -490,9 +522,12 @@ pi-webapp/
 ├── src/                  extension + server + daemon (TypeScript, ESM)
 ├── web/                  Preact dashboard (Tailwind v4 + daisyUI)
 ├── scripts/build.mjs     tsc, Tailwind CLI, esbuild, static shell
+├── scripts/postinstall.mjs  enables the systemd user service after `npm install`
 ├── bin/pi-webapp.mjs     standalone `pi-webapp` CLI shim
+├── src/systemd.ts        systemd unit generation, autostart convergence
 ├── tests/smoke.mjs       end-to-end smoke test (server + extension contract)
 ├── tests/daemon.mjs      standalone daemon + spawn lifecycle test
+├── tests/autostart.mjs   systemd unit + install/uninstall/opt-out test
 ├── dist/                 build output (generated, committed, shipped in the package)
 ├── package.json
 ├── tsconfig.json
@@ -507,6 +542,7 @@ npm run typecheck     # strict TypeScript check, no emit
 npm run check         # typecheck + syntax-check the dashboard bundle
 npm test              # smoke test (requires a build)
 node tests/daemon.mjs # standalone daemon test (requires a build)
+node tests/autostart.mjs  # systemd autostart test (skips without a user session)
 ```
 
 `dist/` is committed so that `pi install git:...` (which installs with
@@ -517,6 +553,8 @@ bundle. `npm run build` regenerates it; the `prepare` hook reuses an existing
 change.
 
 `npm test` boots a real server on an ephemeral loopback port and walks the public contract: static assets, event ingestion, WebSocket snapshot and broadcast, `Range` streaming (206/416/traversal rejection), prompt routing (local, instance, leech, unknown), leech tailing of a session file and the spawn API lifecycle. It writes only to a temporary directory and exits non-zero on the first failing step, naming it.
+
+`node tests/autostart.mjs` checks the generated unit and then, when a systemd user session is available, installs a throwaway unit (`PI_WEBAPP_SYSTEMD_UNIT`), asserts it is enabled and answering, verifies a second daemon waits on a busy port, uninstalls it and confirms the opt-out is respected. It skips cleanly in containers.
 
 `node tests/daemon.mjs` boots the real `bin/pi-webapp.mjs serve` daemon on a free port with a fake `pi` executable (no model calls), then checks the dashboard, `POST /api/spawn`, the spawn log tail, `DELETE`, status transitions, `SIGTERM` shutdown and port release. Like the smoke test it is dependency-free and writes only to a temporary directory; it prints `DAEMON OK` or `DAEMON FAIL: <reason>`.
 

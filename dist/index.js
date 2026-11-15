@@ -5,6 +5,7 @@ import { createBridge } from "./bridge.js";
 import { daemonStatus, startDetachedDaemon, stopDetachedDaemon } from "./daemonctl.js";
 import { DEFAULT_HOST, DEFAULT_PORT, ENV, isSubagentToolName, makeEvent, newId, str, truncate, } from "./protocol.js";
 import { createCapturePlaywrightTool, createPostWorkStateTool } from "./tools.js";
+import { describeSystemdService, ensureAutostartService, installSystemdService, uninstallSystemdService, } from "./systemd.js";
 /** Repository/package root; used to describe the extension and to spawn siblings. */
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const HEADER_READ_BYTES = 64 * 1024;
@@ -218,6 +219,7 @@ export default function piWebapp(pi) {
             return false;
         }
     }
+    let autostartNotified = false;
     async function ensureBridge() {
         if (bridge)
             return;
@@ -249,6 +251,25 @@ export default function piWebapp(pi) {
         }
         await bridgePromise;
     }
+    /** Makes sure the always-on systemd dashboard exists before we decide to host one ourselves. */
+    async function prepareAutostart() {
+        try {
+            const host = process.env[ENV.host]?.trim() || DEFAULT_HOST;
+            const port = Number(process.env[ENV.port]) || DEFAULT_PORT;
+            const result = await ensureAutostartService({ host, port, start: true, waitMs: 5_000 });
+            if (!result.installed || !result.changed || autostartNotified)
+                return;
+            autostartNotified = true;
+            notify([
+                `pi-webapp: dashboard autostart enabled (${result.unitPath})`,
+                `It starts at login and keeps running after pi exits: ${result.url}`,
+                'Opt out with "/webapp daemon uninstall"; logs: journalctl --user -u pi-webapp -f',
+            ].join("\n"), "info");
+        }
+        catch {
+            // autostart is a convenience; a failure must not block the session
+        }
+    }
     function restoreEnv(toolCallId) {
         const saved = envStack.get(toolCallId);
         if (!saved)
@@ -277,6 +298,32 @@ export default function piWebapp(pi) {
         const verb = action && action.length > 0 ? action : "start";
         const requestedPort = portArg && /^\d+$/.test(portArg) ? Number(portArg) : undefined;
         try {
+            if (verb === "install") {
+                const result = await installSystemdService({
+                    ...(requestedPort === undefined ? {} : { port: requestedPort }),
+                    start: true,
+                });
+                notify([
+                    `pi-webapp: systemd user service ${result.changed ? "installed" : "refreshed"}: ${result.unitPath}`,
+                    `It starts at login and keeps the dashboard running after pi exits: ${result.url}`,
+                    result.detail ?? "",
+                    "Logs: journalctl --user -u pi-webapp -f",
+                    'Remove it again with "/webapp daemon uninstall".',
+                ]
+                    .filter(Boolean)
+                    .join("\n"), "info");
+                return;
+            }
+            if (verb === "uninstall") {
+                const result = uninstallSystemdService();
+                notify([
+                    result.removed
+                        ? `pi-webapp: removed ${result.unitPath}`
+                        : `pi-webapp: no systemd unit at ${result.unitPath}`,
+                    "Autostart stays disabled until you run /webapp daemon install again.",
+                ].join("\n"), "info");
+                return;
+            }
             if (verb === "start") {
                 const result = await startDetachedDaemon(requestedPort === undefined ? {} : { port: requestedPort });
                 notify(result.alreadyRunning
@@ -296,12 +343,13 @@ export default function piWebapp(pi) {
                     `URL: ${status.url}`,
                     status.pid ? `PID: ${status.pid}` : "PID: (not managed by pi-webapp)",
                     status.detail ?? "",
+                    describeSystemdService(),
                 ]
                     .filter(Boolean)
                     .join("\n"), "info");
                 return;
             }
-            notify("Usage: /webapp [status] | /webapp daemon [start|stop|status]", "warning");
+            notify("Usage: /webapp [status] | /webapp daemon [start [port]|stop|status|install|uninstall]", "warning");
         }
         catch (error) {
             notify(`pi-webapp: ${error instanceof Error ? error.message : String(error)}`, "error");
@@ -369,6 +417,7 @@ export default function piWebapp(pi) {
                 isSubagent: Boolean(parentSessionId),
                 busy: false,
             };
+            await prepareAutostart();
             await ensureBridge();
             const title = str(sessionName, path.basename(cwd) || cwd);
             const model = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined;

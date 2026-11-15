@@ -1,6 +1,6 @@
 {
 	"name": "pi-webapp",
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"description": "Browser dashboard for pi coding-agent sessions: live activity, subagent trees, prompts, screenshots and Playwright recordings.",
 	"type": "module",
 	"license": "MIT",
@@ -37,12 +37,14 @@
 	"scripts": {
 		"build": "node scripts/build.mjs",
 		"prepare": "node scripts/prepare.mjs",
+		"postinstall": "node scripts/postinstall.mjs",
 		"typecheck": "tsc --noEmit",
 		"check": "npm run typecheck && node --check dist/web/app.js",
 		"test": "node tests/smoke.mjs",
 		"prepublishOnly": "npm run build && npm run typecheck",
 		"test:daemon": "node tests/daemon.mjs",
-		"test:all": "node tests/smoke.mjs && node tests/daemon.mjs"
+		"test:all": "node tests/smoke.mjs && node tests/daemon.mjs",
+		"test:autostart": "node tests/autostart.mjs"
 	},
 	"dependencies": {
 		"@juicesharp/rpiv-todo": "^2.15.0",

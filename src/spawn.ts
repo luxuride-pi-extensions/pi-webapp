@@ -86,7 +86,7 @@ export function isLoopbackUrl(url: string): boolean {
 	}
 }
 
-function defaultPiBin(): string {
+export function defaultPiBin(): string {
 	const fromEnv = process.env[ENV.piBin];
 	if (fromEnv && fromEnv.trim()) return fromEnv.trim();
 	const candidates = [

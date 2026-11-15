@@ -113,6 +113,12 @@ export function parseArgs(argv) {
             case "--no-spawn":
                 options.spawn = false;
                 break;
+            case "--wait":
+                options.wait = true;
+                break;
+            case "--retry-ms":
+                options.retryMs = Number(takeValue());
+                break;
             default:
                 if (arg.startsWith("-"))
                     throw new Error(`unknown option: ${arg}`);
@@ -123,6 +129,9 @@ export function parseArgs(argv) {
         throw new Error(`unexpected argument: ${rest[0]}`);
     if (options.port !== undefined && (!Number.isInteger(options.port) || options.port < 0 || options.port > 65535)) {
         throw new Error("--port must be an integer between 0 and 65535");
+    }
+    if (options.retryMs !== undefined && (!Number.isFinite(options.retryMs) || options.retryMs < 50)) {
+        throw new Error("--retry-ms must be a number of milliseconds >= 50");
     }
     return options;
 }
@@ -140,6 +149,8 @@ Options:
       --leech-dir <dir>      Extra directory to leech (repeatable)
       --no-leech             Do not leech pi session files
       --no-spawn             Do not allow the dashboard to start pi sessions
+      --wait                 Retry instead of exiting while the port is busy (service mode)
+      --retry-ms <ms>        Delay between bind retries with --wait (default: 2000)
   -v, --version              Print the version and exit
   -h, --help                 Show this help
 
@@ -175,17 +186,41 @@ export async function runCli(argv, io = {
         io.stdout(`${readVersion()}\n`);
         return { code: 0 };
     }
-    let handle;
-    try {
-        handle = await startDaemon(options);
+    let handle = null;
+    if (options.wait) {
+        let waitingNotice = false;
+        const retryMs = options.retryMs ?? 2_000;
+        for (;;) {
+            try {
+                handle = await startDaemon(options);
+                break;
+            }
+            catch (error) {
+                if (!isAddressInUse(error)) {
+                    io.stderr(`pi-webapp: failed to start: ${error instanceof Error ? error.message : String(error)}\n`);
+                    return { code: 1 };
+                }
+                if (!waitingNotice) {
+                    waitingNotice = true;
+                    io.stdout("pi-webapp: dashboard port is busy, waiting for it to free up\n");
+                }
+                await new Promise((resolve) => setTimeout(resolve, retryMs));
+            }
+        }
     }
-    catch (error) {
-        io.stderr(`pi-webapp: failed to start: ${error instanceof Error ? error.message : String(error)}\n`);
-        return { code: 1 };
+    else {
+        try {
+            handle = await startDaemon(options);
+        }
+        catch (error) {
+            io.stderr(`pi-webapp: failed to start: ${error instanceof Error ? error.message : String(error)}\n`);
+            return { code: 1 };
+        }
     }
-    io.stdout(`pi-webapp listening on ${handle.url}\n`);
-    io.stdout(handle.spawner
-        ? `sessions can be started from the dashboard (${handle.spawner.piBin})\n`
+    const started = handle;
+    io.stdout(`pi-webapp listening on ${started.url}\n`);
+    io.stdout(started.spawner
+        ? `sessions can be started from the dashboard (${started.spawner.piBin})\n`
         : "sessions cannot be started from the dashboard\n");
     let stopping = false;
     const shutdown = async (signal) => {
@@ -194,7 +229,7 @@ export async function runCli(argv, io = {
         stopping = true;
         io.stdout(`pi-webapp: shutting down (${signal})\n`);
         try {
-            await handle.stop();
+            await started.stop();
         }
         catch {
             // best effort
@@ -209,6 +244,12 @@ export async function runCli(argv, io = {
         // Serve until a signal arrives.
     });
     return { code: 0 };
+}
+function isAddressInUse(error) {
+    const code = error?.code;
+    if (code === "EADDRINUSE")
+        return true;
+    return /EADDRINUSE/i.test(error instanceof Error ? error.message : String(error));
 }
 function readVersion() {
     try {

@@ -20,6 +20,12 @@ import {
 } from "./protocol.js";
 import { createCapturePlaywrightTool, createPostWorkStateTool } from "./tools.js";
 import type { ToolRuntime } from "./tools.js";
+import {
+	describeSystemdService,
+	ensureAutostartService,
+	installSystemdService,
+	uninstallSystemdService,
+} from "./systemd.js";
 
 /** Repository/package root; used to describe the extension and to spawn siblings. */
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -258,6 +264,8 @@ export default function piWebapp(pi: ExtensionAPI): void {
 		}
 	}
 
+	let autostartNotified = false;
+
 	async function ensureBridge(): Promise<void> {
 		if (bridge) return;
 		if (!bridgePromise) {
@@ -286,6 +294,27 @@ export default function piWebapp(pi: ExtensionAPI): void {
 			})();
 		}
 		await bridgePromise;
+	}
+
+	/** Makes sure the always-on systemd dashboard exists before we decide to host one ourselves. */
+	async function prepareAutostart(): Promise<void> {
+		try {
+			const host = process.env[ENV.host]?.trim() || DEFAULT_HOST;
+			const port = Number(process.env[ENV.port]) || DEFAULT_PORT;
+			const result = await ensureAutostartService({ host, port, start: true, waitMs: 5_000 });
+			if (!result.installed || !result.changed || autostartNotified) return;
+			autostartNotified = true;
+			notify(
+				[
+					`pi-webapp: dashboard autostart enabled (${result.unitPath})`,
+					`It starts at login and keeps running after pi exits: ${result.url}`,
+					'Opt out with "/webapp daemon uninstall"; logs: journalctl --user -u pi-webapp -f',
+				].join("\n"),
+				"info",
+			);
+		} catch {
+			// autostart is a convenience; a failure must not block the session
+		}
 	}
 
 	function restoreEnv(toolCallId: string): void {
@@ -317,6 +346,38 @@ export default function piWebapp(pi: ExtensionAPI): void {
 		const verb = action && action.length > 0 ? action : "start";
 		const requestedPort = portArg && /^\d+$/.test(portArg) ? Number(portArg) : undefined;
 		try {
+			if (verb === "install") {
+				const result = await installSystemdService({
+					...(requestedPort === undefined ? {} : { port: requestedPort }),
+					start: true,
+				});
+				notify(
+					[
+						`pi-webapp: systemd user service ${result.changed ? "installed" : "refreshed"}: ${result.unitPath}`,
+						`It starts at login and keeps the dashboard running after pi exits: ${result.url}`,
+						result.detail ?? "",
+						"Logs: journalctl --user -u pi-webapp -f",
+						'Remove it again with "/webapp daemon uninstall".',
+					]
+						.filter(Boolean)
+						.join("\n"),
+					"info",
+				);
+				return;
+			}
+			if (verb === "uninstall") {
+				const result = uninstallSystemdService();
+				notify(
+					[
+						result.removed
+							? `pi-webapp: removed ${result.unitPath}`
+							: `pi-webapp: no systemd unit at ${result.unitPath}`,
+						"Autostart stays disabled until you run /webapp daemon install again.",
+					].join("\n"),
+					"info",
+				);
+				return;
+			}
 			if (verb === "start") {
 				const result = await startDetachedDaemon(requestedPort === undefined ? {} : { port: requestedPort });
 				notify(
@@ -343,6 +404,7 @@ export default function piWebapp(pi: ExtensionAPI): void {
 						`URL: ${status.url}`,
 						status.pid ? `PID: ${status.pid}` : "PID: (not managed by pi-webapp)",
 						status.detail ?? "",
+						describeSystemdService(),
 					]
 						.filter(Boolean)
 						.join("\n"),
@@ -350,7 +412,7 @@ export default function piWebapp(pi: ExtensionAPI): void {
 				);
 				return;
 			}
-			notify("Usage: /webapp [status] | /webapp daemon [start|stop|status]", "warning");
+			notify("Usage: /webapp [status] | /webapp daemon [start [port]|stop|status|install|uninstall]", "warning");
 		} catch (error) {
 			notify(`pi-webapp: ${error instanceof Error ? error.message : String(error)}`, "error");
 		}
@@ -425,6 +487,7 @@ export default function piWebapp(pi: ExtensionAPI): void {
 				busy: false,
 			};
 
+			await prepareAutostart();
 			await ensureBridge();
 
 			const title = str(sessionName, path.basename(cwd) || cwd);

@@ -27,6 +27,10 @@ export const ENV = {
 	sessionDir: "PI_WEBAPP_SESSION_DIR",
 	/** Identifies a session started by the dashboard (read by the child pi). */
 	spawnId: "PI_WEBAPP_SPAWN_ID",
+	/** Set to 0 to skip the systemd user service integration. */
+	autostart: "PI_WEBAPP_AUTOSTART",
+	/** Overrides the systemd unit name (tests use a throwaway unit). */
+	systemdUnit: "PI_WEBAPP_SYSTEMD_UNIT",
 	/** Propagated into child `pi` processes spawned as subagents. */
 	parentSessionId: "PI_WEBAPP_PARENT_SESSION_ID",
 	agentName: "PI_WEBAPP_AGENT_NAME",
