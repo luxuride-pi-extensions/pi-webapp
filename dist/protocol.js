@@ -16,6 +16,7 @@ export const ENV = {
     cacheDir: "PI_WEBAPP_CACHE_DIR",
     leech: "PI_WEBAPP_LEECH",
     leechDir: "PI_WEBAPP_LEECH_DIR",
+    leechMaxAge: "PI_WEBAPP_LEECH_MAX_AGE_MS",
     playwright: "PI_WEBAPP_PLAYWRIGHT",
     /** Set to 0 to forbid the dashboard from launching pi processes. */
     spawn: "PI_WEBAPP_SPAWN",

@@ -7,6 +7,7 @@
  * always marked with source "leech" so consumers can prefer live data.
  */
 
+import { scanPiSessionOwners, sessionIdFromSessionFile } from "./procs.js";
 import type { Dirent, Stats } from "node:fs";
 import { open, readdir, stat as statFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
@@ -24,7 +25,7 @@ import {
 	WATCH_INTERVAL_MS,
 } from "./protocol.js";
 
-const DEFAULT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_MAX_AGE_MS = 15 * 60 * 1000;
 const DEFAULT_REPLAY_LIMIT = 40;
 const MAX_SCAN_DEPTH = 4;
 const MAX_FILES = 5000;
@@ -75,6 +76,8 @@ interface FileState {
 	model: string;
 	parentSessionPath?: string;
 	parentSessionId?: string;
+	/** Best effort: true while the transcript ends inside an unfinished turn. */
+	pendingTurn?: boolean;
 }
 
 interface ToolCallInfo {
@@ -237,6 +240,9 @@ export class SessionLeech {
 	private lastScanAt: number | undefined;
 	private lastError: string | undefined;
 	private malformedLines = 0;
+	private skippedStale = 0;
+	private ownersBySession = new Map<string, number[]>();
+	private pendingBySession = new Map<string, boolean>();
 
 	constructor(options: SessionLeechOptions) {
 		this.dirs = normalizeDirs(options.dirs);
@@ -258,6 +264,22 @@ export class SessionLeech {
 
 	get running(): boolean {
 		return this.timer !== null;
+	}
+
+	/** Freshness window applied to session files that no live process owns. */
+	get maxAge(): number {
+		return this.maxAgeMs;
+	}
+
+	/**
+	 * Live-process view of a session: which `pi` pids own it, and whether the
+	 * transcript ends inside a turn (so killing the owner would lose work).
+	 */
+	sessionRuntime(sessionId: string): { pids: number[]; pending: boolean } {
+		return {
+			pids: this.ownersBySession.get(sessionId) ?? [],
+			pending: this.pendingBySession.get(sessionId) ?? false,
+		};
 	}
 
 	start(): void {
@@ -298,6 +320,8 @@ export class SessionLeech {
 			dirs: [...this.dirs],
 			files: this.files.size,
 			sessions: this.sessionIds.size,
+			skippedStale: this.skippedStale,
+			maxAgeMs: this.maxAgeMs,
 		};
 		if (this.lastScanAt !== undefined) status.lastScanAt = this.lastScanAt;
 		if (this.lastError !== undefined) status.lastError = this.lastError;
@@ -316,7 +340,19 @@ export class SessionLeech {
 
 	private async scan(): Promise<void> {
 		const now = Date.now();
-		const listing = await this.collectFiles(now);
+		// One /proc pass per scan: it decides both which stale files stay and
+		// which running pi process owns a session (used by takeover).
+		const owners = scanPiSessionOwners();
+		this.ownersBySession = owners.pids;
+		const { recent, stale } = await this.collectFiles(now);
+		const listing = new Map(recent);
+		let skipped = 0;
+		for (const [filePath, fileStat] of stale) {
+			const sessionId = sessionIdFromSessionFile(filePath) ?? this.files.get(filePath)?.sessionId ?? null;
+			if (sessionId && owners.pids.has(sessionId)) listing.set(filePath, fileStat);
+			else skipped += 1;
+		}
+		this.skippedStale = skipped;
 
 		// Pre-pass: resolve every file's session header before emitting anything so
 		// parentSession (an absolute file path) can be mapped to a session id.
@@ -348,20 +384,29 @@ export class SessionLeech {
 			}
 		}
 
+		this.pendingBySession.clear();
+		for (const state of this.files.values()) {
+			if (state.pendingTurn !== undefined) this.pendingBySession.set(state.sessionId, state.pendingTurn);
+		}
 		this.lastScanAt = Date.now();
 	}
 
-	private async collectFiles(now: number): Promise<Map<string, Stats>> {
-		const files = new Map<string, Stats>();
+	private async collectFiles(now: number): Promise<{ recent: Map<string, Stats>; stale: Map<string, Stats> }> {
+		const files = { recent: new Map<string, Stats>(), stale: new Map<string, Stats>() };
 		for (const dir of this.dirs) {
 			await this.walk(dir, 0, now, files);
-			if (files.size >= MAX_FILES) break;
+			if (files.recent.size + files.stale.size >= MAX_FILES) break;
 		}
 		return files;
 	}
 
-	private async walk(dir: string, depth: number, now: number, out: Map<string, Stats>): Promise<void> {
-		if (out.size >= MAX_FILES) return;
+	private async walk(
+		dir: string,
+		depth: number,
+		now: number,
+		out: { recent: Map<string, Stats>; stale: Map<string, Stats> },
+	): Promise<void> {
+		if (out.recent.size + out.stale.size >= MAX_FILES) return;
 		let entries: Dirent[];
 		try {
 			entries = await readdir(dir, { withFileTypes: true });
@@ -370,7 +415,7 @@ export class SessionLeech {
 			return;
 		}
 		for (const entry of entries) {
-			if (out.size >= MAX_FILES) return;
+			if (out.recent.size + out.stale.size >= MAX_FILES) return;
 			if (entry.isSymbolicLink()) continue;
 			const fullPath = join(dir, entry.name);
 			if (entry.isDirectory()) {
@@ -381,8 +426,8 @@ export class SessionLeech {
 			try {
 				const fileStat = await statFile(fullPath);
 				if (!fileStat.isFile()) continue;
-				if (now - fileStat.mtimeMs > this.maxAgeMs) continue;
-				out.set(fullPath, fileStat);
+				if (now - fileStat.mtimeMs > this.maxAgeMs) out.stale.set(fullPath, fileStat);
+				else out.recent.set(fullPath, fileStat);
 			} catch {
 				// Vanished or unreadable files are simply skipped.
 			}
@@ -541,6 +586,7 @@ export class SessionLeech {
 		const role = str(message.role);
 
 		if (role === "user") {
+			state.pendingTurn = true;
 			const text = truncate(contentText(message.content), MAX_PROMPT_CHARS);
 			this.deliver(state, this.makeEvent(state, "user_prompt", timestamp, { text }));
 			return;
@@ -548,6 +594,9 @@ export class SessionLeech {
 
 		if (role === "assistant") {
 			const parts = assistantParts(message.content);
+			// A finished assistant message without tool calls closes the turn;
+			// tool calls mean the agent is still working.
+			state.pendingTurn = parts.toolCalls.length > 0;
 			const model = modelLabel(str(message.provider), str(message.model));
 			if (model) state.model = model;
 			this.deliver(
@@ -582,6 +631,7 @@ export class SessionLeech {
 		}
 
 		if (role === "toolResult") {
+			state.pendingTurn = true;
 			this.deliver(
 				state,
 				this.makeEvent(state, "tool_end", timestamp, {

@@ -48,6 +48,23 @@ export interface WebappConnection {
 	rescanLeech(): Promise<void>;
 	startSession(input: SpawnInput): Promise<StartSessionResult>;
 	stopSpawn(spawnId: string): Promise<StopSpawnResult>;
+	takeOverSession(sessionId: string, options?: { kill?: boolean }): Promise<TakeOverResult>;
+	removeSession(sessionId: string, options?: { deleteFile?: boolean }): Promise<RemoveSessionResult>;
+}
+
+export interface RemoveSessionResult {
+	ok: boolean;
+	error?: string;
+	removed?: string[];
+}
+
+export interface TakeOverResult {
+	ok: boolean;
+	error?: string;
+	/** An idle pi process still owns the session; it can be stopped and replaced. */
+	needsKill?: boolean;
+	/** Pid reported by the server for the owning process. */
+	pid?: number;
 }
 
 const EMPTY_EVENTS: WebappEvent[] = [];
@@ -104,6 +121,7 @@ function parseServerMessage(raw: string): ServerToClientMessage | null {
 			type === "session" ||
 			type === "spawn" ||
 			type === "spawns" ||
+			type === "session_removed" ||
 			type === "command" ||
 			type === "hello_ok" ||
 			type === "pong"
@@ -283,6 +301,18 @@ export function useWebSocket(): WebappConnection {
 				else if (message.type === "session") upsertSession(message.session);
 				else if (message.type === "spawn") upsertSpawn(message.spawn);
 				else if (message.type === "spawns") setSpawnState(normalizeSpawnState(message.state));
+				else if (message.type === "session_removed") {
+					const removed = new Set(message.sessionIds);
+					setState((previous) =>
+						previous
+							? {
+									...previous,
+									sessions: previous.sessions.filter((session) => !removed.has(session.id)),
+									events: previous.events.filter((event) => !removed.has(event.sessionId)),
+								}
+							: previous,
+					);
+				}
 			};
 			nextSocket.onerror = () => {
 				if (disposed) return;
@@ -407,6 +437,65 @@ export function useWebSocket(): WebappConnection {
 		}
 	}, []);
 
+	const takeOverSession = useCallback(
+		async (sessionId: string, options: { kill?: boolean } = {}): Promise<TakeOverResult> => {
+			try {
+				const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/takeover`, {
+					method: "POST",
+					headers: { "content-type": "application/json", accept: "application/json" },
+					body: JSON.stringify({ kill: options.kill === true }),
+				});
+				let payload: unknown = null;
+				try {
+					payload = await response.json();
+				} catch {
+					payload = null;
+				}
+				const record = payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
+				if (response.ok) return { ok: true };
+				const message = typeof record.error === "string" ? record.error : `Request failed (${response.status})`;
+				return {
+					ok: false,
+					error: message,
+					needsKill: record.code === "owner-running" && record.canKill === true,
+					pid: typeof record.pid === "number" ? record.pid : undefined,
+				};
+			} catch (err) {
+				return { ok: false, error: errorMessage(err) };
+			}
+		},
+		[],
+	);
+
+	const removeSession = useCallback(
+		async (sessionId: string, options: { deleteFile?: boolean } = {}): Promise<RemoveSessionResult> => {
+			try {
+				const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, {
+					method: "DELETE",
+					headers: { "content-type": "application/json", accept: "application/json" },
+					body: JSON.stringify({ deleteFile: options.deleteFile === true }),
+				});
+				let payload: unknown = null;
+				try {
+					payload = await response.json();
+				} catch {
+					payload = null;
+				}
+				const record = payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
+				if (!response.ok) {
+					return { ok: false, error: typeof record.error === "string" ? record.error : `Request failed (${response.status})` };
+				}
+				return {
+					ok: true,
+					removed: Array.isArray(record.removed) ? record.removed.filter((id): id is string => typeof id === "string") : [],
+				};
+			} catch (err) {
+				return { ok: false, error: errorMessage(err) };
+			}
+		},
+		[],
+	);
+
 	const rescanLeech = useCallback(async (): Promise<void> => {
 		try {
 			const response = await fetch("/api/leech/scan", {
@@ -434,5 +523,7 @@ export function useWebSocket(): WebappConnection {
 		rescanLeech,
 		startSession,
 		stopSpawn,
+		takeOverSession,
+		removeSession,
 	};
 }

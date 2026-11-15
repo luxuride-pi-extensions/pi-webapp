@@ -13,6 +13,16 @@ export interface ActivityFeedProps {
 }
 
 const NEAR_BOTTOM_PX = 120;
+
+/** Events a subagent may contribute to its parent's feed. */
+const CHILD_FEED_TYPES = new Set<WebappEventType>([
+	"subagent_spawned",
+	"subagent_completed",
+	"work_state",
+	"session_started",
+	"session_ended",
+	"error",
+]);
 const SUMMARY_DETAIL_LIMIT = 160;
 
 const SYSTEM_LABELS: Partial<Record<WebappEventType, string>> = {
@@ -143,6 +153,31 @@ interface RenderProps {
 	onOpenImage: (asset: MediaAsset) => void;
 }
 
+/**
+ * Long agent output stays readable: clamp the bubble, keep the full text one
+ * click away.
+ */
+function ClampedMarkdown({ text }: { text: string }) {
+	const [open, setOpen] = useState(false);
+	const long = text.length > 700 || text.split("\n").length > 10;
+	if (!long) return <MarkdownText text={text} />;
+	return (
+		<div>
+			<div class={open ? undefined : "max-h-56 overflow-hidden [mask-image:linear-gradient(to_bottom,black_70%,transparent)]"}>
+				<MarkdownText text={text} />
+			</div>
+			<button
+				type="button"
+				class="btn btn-ghost btn-xs mt-1 px-1 text-primary"
+				onClick={() => setOpen((value) => !value)}
+				aria-expanded={open}
+			>
+				{open ? "show less" : `show more (${text.length.toLocaleString()} chars)`}
+			</button>
+		</div>
+	);
+}
+
 function renderAssistant({ event }: RenderProps) {
 	const text = pickText(event, ["text", "message", "content"]);
 	const reasoning = pickString(event, ["reasoning", "thinking"]);
@@ -153,7 +188,7 @@ function renderAssistant({ event }: RenderProps) {
 				<time class="ml-2 font-mono opacity-70">{clock(event.timestamp)}</time>
 			</div>
 			<div class="chat-bubble max-w-[85%] bg-base-200 text-sm text-base-content">
-				<MarkdownText text={text} />
+				<ClampedMarkdown text={text} />
 				{reasoning && (
 					<details class="mt-2 text-xs">
 						<summary class="cursor-pointer opacity-60">reasoning</summary>
@@ -267,7 +302,7 @@ function renderWorkState({ event, showSubagent, sessions, onSelectSession, onOpe
 			</div>
 			{body && (
 				<div class="mt-1 text-sm">
-					<MarkdownText text={body} />
+					<ClampedMarkdown text={body} />
 				</div>
 			)}
 			{url && (
@@ -371,7 +406,7 @@ function EventRow({ event, showSubagent, sessions, onSelectSession, onOpenImage 
 			}
 	}
 	return (
-		<div class="fade-in">
+		<div class="fade-in" data-testid="feed-event" data-event-type={event.type}>
 			{showSubagent && event.type !== "work_state" && (
 				<div class="mb-1">
 					<SubagentTag event={event} sessions={sessions} onSelectSession={onSelectSession} />
@@ -389,9 +424,16 @@ export function ActivityFeed({ events, sessions, selected, onSelectSession, onOp
 
 	const visible = useMemo(() => {
 		if (!selected) return [];
+		// A subagent's turn-by-turn chatter belongs to its own view. The parent
+		// feed only carries lifecycle markers plus visual artifacts that were
+		// explicitly attributed to it.
 		const rows = selected.isSubagent
 			? events.filter((event) => event.sessionId === selected.id)
-			: events.filter((event) => event.sessionId === selected.id || event.parentSessionId === selected.id);
+			: events.filter(
+					(event) =>
+						event.sessionId === selected.id ||
+						(event.parentSessionId === selected.id && CHILD_FEED_TYPES.has(event.type)),
+				);
 		return rows.slice().sort((a, b) => a.timestamp - b.timestamp || a.id.localeCompare(b.id));
 	}, [events, selected]);
 
@@ -433,7 +475,12 @@ export function ActivityFeed({ events, sessions, selected, onSelectSession, onOp
 
 	return (
 		<div class="relative flex h-full min-h-0 flex-col">
-			<div ref={scrollRef} onScroll={updateAtBottom} class="feed-scroll min-h-0 flex-1 overflow-y-auto px-3 py-3">
+			<div
+				ref={scrollRef}
+				onScroll={updateAtBottom}
+				class="feed-scroll min-h-0 flex-1 overflow-y-auto px-3 py-3"
+				data-testid="feed"
+			>
 				{selected?.isSubagent && (
 					<div class="sticky top-0 z-10 mb-3 rounded-box border border-base-300 border-l-4 border-l-secondary bg-base-200/95 p-3 backdrop-blur">
 						<div class="mb-1 text-[10px] uppercase tracking-wide opacity-50">task</div>

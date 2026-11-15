@@ -5,20 +5,22 @@ import { LightboxModal } from "./components/LightboxModal";
 import { NewSessionModal } from "./components/NewSessionModal";
 import { PromptBar } from "./components/PromptBar";
 import { SessionTree } from "./components/SessionTree";
+import { SubagentRail } from "./components/SubagentRail";
 import { StatusBadge } from "./components/StatusBadge";
 import { useWebSocket } from "./hooks/useWebSocket";
+import { navigate, useRoute } from "./router";
 
 const REPO_URL = "https://github.com/luxuride-pi-extensions/pi-webapp";
 const SPAWN_DISABLED_HINT =
 	"This dashboard cannot start sessions — run the standalone daemon on loopback, or the primary pi instance";
 
-function readSessionHash(): string | null {
-	const match = /(?:^|[#&])session=([^&]+)/.exec(window.location.hash);
-	if (!match) return null;
+const EXPAND_ALL_KEY = "pi-webapp:expand-all";
+
+function readExpandAll(): boolean {
 	try {
-		return decodeURIComponent(match[1]);
+		return window.localStorage.getItem(EXPAND_ALL_KEY) === "1";
 	} catch {
-		return match[1];
+		return false;
 	}
 }
 
@@ -46,6 +48,15 @@ function elapsedTime(startedAt: number, now: number): string {
 	return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }
 
+function basename(filePath: string): string {
+	const parts = filePath.split("/");
+	return parts[parts.length - 1] ?? filePath;
+}
+
+function sessionLabel(session: SessionNode): string {
+	return session.title ? `${session.agentName ?? "session"} — ${session.title}` : (session.agentName ?? "This session");
+}
+
 function cwdBasename(cwd: string): string {
 	const parts = cwd.split("/").filter(Boolean);
 	return parts.length > 0 ? parts[parts.length - 1] : cwd;
@@ -59,11 +70,25 @@ interface TopBarProps {
 	leech: LeechStatus | null;
 	scanning: boolean;
 	spawnEnabled: boolean;
+	expandAll: boolean;
 	onNewSession: () => void;
 	onRescan: () => void;
+	onToggleExpand: () => void;
 }
 
-function TopBar({ status, sessions, subagents, events, leech, scanning, spawnEnabled, onNewSession, onRescan }: TopBarProps) {
+function TopBar({
+	status,
+	sessions,
+	subagents,
+	events,
+	leech,
+	scanning,
+	spawnEnabled,
+	expandAll,
+	onNewSession,
+	onRescan,
+	onToggleExpand,
+}: TopBarProps) {
 	const live = status === "open";
 	const dirs = leech?.dirs ?? [];
 	return (
@@ -109,6 +134,17 @@ function TopBar({ status, sessions, subagents, events, leech, scanning, spawnEna
 					</svg>
 					New session
 				</button>
+				<button
+					type="button"
+					class={`btn btn-xs gap-1 ${expandAll ? "btn-active btn-secondary" : "btn-ghost"}`}
+					onClick={onToggleExpand}
+					aria-pressed={expandAll}
+					title={expandAll ? "Collapse subagents (main sessions stay open)" : "Expand every session and subagent"}
+					data-testid="expand-all"
+				>
+					<span aria-hidden="true">{expandAll ? "⤢" : "⤢"}</span>
+					{expandAll ? "collapse subagents" : "expand all"}
+				</button>
 				<button type="button" class="btn btn-ghost btn-xs" onClick={onRescan} disabled={scanning}>
 					{scanning && <span class="loading loading-spinner loading-xs" />}
 					Rescan
@@ -125,10 +161,22 @@ interface SessionHeaderProps {
 	session: SessionNode;
 	parent: SessionNode | null;
 	onSelect: (id: string) => void;
+	onTakeOver?: (session: SessionNode) => void;
+	onRemove?: (session: SessionNode) => void;
+	takeoverBusy?: boolean;
 }
 
-function SessionHeader({ session, parent, onSelect }: SessionHeaderProps) {
+function SessionHeader({
+	session,
+	parent,
+	onSelect,
+	onTakeOver,
+	onRemove,
+	takeoverBusy = false,
+}: SessionHeaderProps) {
 	const name = session.agentName ?? "session";
+	const canTakeOver = session.source === "leech" && !session.isSubagent && !!onTakeOver;
+	const busy = takeoverBusy || !!session.takeoverSpawnId;
 	return (
 		<div class="border-b border-base-300 bg-base-100 px-4 py-3">
 			<div class="card card-border border-base-300 bg-base-200/50">
@@ -140,6 +188,43 @@ function SessionHeader({ session, parent, onSelect }: SessionHeaderProps) {
 							<span class="badge badge-secondary badge-outline badge-sm">
 								subagent of {parent?.agentName ?? "parent"}
 							</span>
+						)}
+						{session.ownerPid !== undefined && (
+							<span
+								class={`badge badge-sm font-mono ${session.ownerBusy ? "badge-warning" : "badge-outline"}`}
+								title={
+									session.ownerBusy
+										? `This session is busy in pi pid ${session.ownerPid}`
+										: `This session is open in pi pid ${session.ownerPid}`
+								}
+							>
+								pid {session.ownerPid}
+								{session.ownerBusy ? " · busy" : ""}
+							</span>
+						)}
+						{canTakeOver && (
+							<button
+								type="button"
+								class="btn btn-primary btn-outline btn-xs gap-1"
+								disabled={busy}
+								onClick={() => onTakeOver?.(session)}
+								title="Resume this session in a new pi process and prompt it from here"
+								data-testid="takeover-button"
+							>
+								{busy ? <span class="loading loading-spinner loading-xs" /> : <span aria-hidden="true">↻</span>}
+								{busy ? "taking over…" : "take over"}
+							</button>
+						)}
+						{onRemove && (
+							<button
+								type="button"
+								class="btn btn-ghost btn-xs text-error/80 hover:bg-error/10"
+								onClick={() => onRemove(session)}
+								title="Remove this session from the dashboard"
+								data-testid="remove-session"
+							>
+								remove
+							</button>
 						)}
 						<span class="ml-auto font-mono text-[11px] opacity-50">
 							updated {relativeTime(session.updatedAt)}
@@ -234,18 +319,38 @@ export function App() {
 		defaultCwd,
 		startSession,
 		stopSpawn,
+		takeOverSession,
+		removeSession,
 	} = useWebSocket();
-	const [selectedId, setSelectedId] = useState<string | null>(readSessionHash);
+	const route = useRoute();
+	const selectedId = route.view === "session" ? route.sessionId : null;
 	const [lightbox, setLightbox] = useState<MediaAsset | null>(null);
 	const [scanning, setScanning] = useState(false);
 	const [modalOpen, setModalOpen] = useState(false);
+	const [expandAll, setExpandAll] = useState(readExpandAll);
+	const [takeoverTarget, setTakeoverTarget] = useState<SessionNode | null>(null);
+	const [removeTarget, setRemoveTarget] = useState<SessionNode | null>(null);
+	const [removeFile, setRemoveFile] = useState(false);
+	const [removeBusy, setRemoveBusy] = useState(false);
+	const [takeoverBusyId, setTakeoverBusyId] = useState<string | null>(null);
+	const [actionError, setActionError] = useState<string | null>(null);
 	const previousSelected = useRef<SessionNode | null>(null);
 	const pendingSpawnId = useRef<string | null>(null);
 
 	const selectSession = useCallback((id: string) => {
-		setSelectedId(id);
-		const nextHash = `#session=${encodeURIComponent(id)}`;
-		if (window.location.hash !== nextHash) window.history.replaceState(null, "", nextHash);
+		navigate({ view: "session", sessionId: id });
+	}, []);
+
+	const toggleExpand = useCallback(() => {
+		setExpandAll((previous) => {
+			const next = !previous;
+			try {
+				window.localStorage.setItem(EXPAND_ALL_KEY, next ? "1" : "0");
+			} catch {
+				/* private mode: keep it in memory only */
+			}
+			return next;
+		});
 	}, []);
 
 	const selected = useMemo(
@@ -256,12 +361,19 @@ export function App() {
 		() => (selected?.parentSessionId ? sessions.find((session) => session.id === selected.parentSessionId) ?? null : null),
 		[sessions, selected],
 	);
-
-	useEffect(() => {
-		const onHashChange = () => setSelectedId(readSessionHash());
-		window.addEventListener("hashchange", onHashChange);
-		return () => window.removeEventListener("hashchange", onHashChange);
-	}, []);
+	const trail = useMemo(() => {
+		const chain: SessionNode[] = [];
+		let current = selected;
+		const seen = new Set<string>();
+		while (current && !seen.has(current.id)) {
+			seen.add(current.id);
+			chain.unshift(current);
+			current = current.parentSessionId
+				? sessions.find((session) => session.id === current?.parentSessionId) ?? null
+				: null;
+		}
+		return chain;
+	}, [sessions, selected]);
 
 	useEffect(() => {
 		if (selected) {
@@ -274,8 +386,9 @@ export function App() {
 			? sessions.find((session) => session.id === previous.parentSessionId) ?? null
 			: null;
 		const fallback = previousParent ?? defaultSession(sessions);
-		if (fallback) selectSession(fallback.id);
-	}, [sessions, selected, selectSession]);
+		// Replace so the first auto-selection does not create a stray history entry.
+		if (fallback) navigate({ view: "session", sessionId: fallback.id }, { replace: true });
+	}, [sessions, selected]);
 
 	// A freshly spawned pi registers itself asynchronously; select it the moment it shows up.
 	useEffect(() => {
@@ -337,6 +450,77 @@ export function App() {
 		[stopSpawn],
 	);
 
+	const handleTakeOver = useCallback(
+		async (session: SessionNode) => {
+			setActionError(null);
+			setTakeoverBusyId(session.id);
+			const result = await takeOverSession(session.id);
+			setTakeoverBusyId(null);
+			if (result.ok) {
+				selectSession(session.id);
+				return;
+			}
+			if (result.needsKill) {
+				setTakeoverTarget(session);
+				return;
+			}
+			setActionError(result.error ?? "Could not take over the session");
+		},
+		[takeOverSession, selectSession],
+	);
+
+	const confirmTakeOver = useCallback(async () => {
+		const session = takeoverTarget;
+		if (!session) return;
+		setTakeoverTarget(null);
+		setActionError(null);
+		setTakeoverBusyId(session.id);
+		const result = await takeOverSession(session.id, { kill: true });
+		setTakeoverBusyId(null);
+		if (result.ok) selectSession(session.id);
+		else setActionError(result.error ?? "Could not take over the session");
+	}, [takeoverTarget, takeOverSession, selectSession]);
+
+	useEffect(() => {
+		if (!takeoverTarget) return;
+		const onKeyDown = (event: KeyboardEvent) => {
+			if (event.key === "Escape") setTakeoverTarget(null);
+		};
+		window.addEventListener("keydown", onKeyDown);
+		return () => window.removeEventListener("keydown", onKeyDown);
+	}, [takeoverTarget]);
+
+	const requestRemove = useCallback((session: SessionNode) => {
+		setActionError(null);
+		setRemoveFile(false);
+		setRemoveTarget(session);
+	}, []);
+
+	const cancelRemove = useCallback(() => setRemoveTarget(null), []);
+
+	const confirmRemove = useCallback(async () => {
+		const session = removeTarget;
+		if (!session) return;
+		setRemoveBusy(true);
+		const result = await removeSession(session.id, { deleteFile: removeFile });
+		setRemoveBusy(false);
+		setRemoveTarget(null);
+		if (!result.ok) {
+			setActionError(result.error ?? "Could not remove the session");
+			return;
+		}
+		if (selectedId && result.removed?.includes(selectedId)) navigate({ view: "overview" }, { replace: true });
+	}, [removeTarget, removeFile, removeSession, selectedId]);
+
+	useEffect(() => {
+		if (!removeTarget) return;
+		const onKeyDown = (event: KeyboardEvent) => {
+			if (event.key === "Escape") setRemoveTarget(null);
+		};
+		window.addEventListener("keydown", onKeyDown);
+		return () => window.removeEventListener("keydown", onKeyDown);
+	}, [removeTarget]);
+
 	const closeLightbox = useCallback(() => setLightbox(null), []);
 	const leech = state?.leech ?? null;
 
@@ -350,8 +534,10 @@ export function App() {
 				leech={leech}
 				scanning={scanning}
 				spawnEnabled={spawnEnabled}
+				expandAll={expandAll}
 				onNewSession={openNewSession}
 				onRescan={handleRescan}
+				onToggleExpand={toggleExpand}
 			/>
 			<div class="flex min-h-0 flex-1">
 				<aside class="w-80 shrink-0 overflow-y-auto border-r border-base-300 bg-base-200">
@@ -361,41 +547,83 @@ export function App() {
 						onSelect={selectSession}
 						spawns={spawns}
 						onStopSpawn={handleStopSpawn}
+						expandAll={expandAll}
+						onTakeOver={handleTakeOver}
+						takeoverBusyId={takeoverBusyId}
+						onRemove={requestRemove}
 					/>
 					<StartingSpawnList spawns={startingSpawns} onCancel={handleStopSpawn} />
 				</aside>
 				<main class="flex min-h-0 min-w-0 flex-1 flex-col">
-					{error && (
-						<div class="alert alert-warning mx-3 mt-2 py-1.5 text-xs" role="status">
-							<span class="truncate">{error}</span>
+					{(error || actionError) && (
+						<div class="alert alert-warning mx-3 mt-2 py-1.5 text-xs" role="alert">
+							<span class="min-w-0 flex-1 truncate">{actionError ?? error}</span>
+							{actionError && (
+								<button
+									type="button"
+									class="btn btn-ghost btn-xs"
+									onClick={() => setActionError(null)}
+									aria-label="Dismiss"
+								>
+									✕
+								</button>
+							)}
 						</div>
 					)}
 					{selected ? (
 						<>
-							<SessionHeader session={selected} parent={parent} onSelect={selectSession} />
+							<SessionHeader
+								session={selected}
+								parent={parent}
+								onSelect={selectSession}
+								onTakeOver={handleTakeOver}
+								onRemove={requestRemove}
+								takeoverBusy={takeoverBusyId === selected.id}
+							/>
 							<nav
 								aria-label="Breadcrumb"
-								class="flex items-center gap-1.5 border-b border-base-300 px-4 py-1 text-[11px] opacity-70"
+								class="flex items-center gap-1.5 overflow-x-auto border-b border-base-300 px-4 py-1 text-[11px] opacity-70"
+								data-testid="breadcrumb"
 							>
-								<span>Sessions</span>
-								{parent && (
-									<>
-										<span>/</span>
-										<button type="button" class="link link-hover" onClick={() => selectSession(parent.id)}>
-											{parent.agentName ?? "parent"}
-										</button>
-									</>
-								)}
-								<span>/</span>
-								<span class="font-medium opacity-100">{selected.agentName ?? "session"}</span>
+								{trail.map((node, index) => {
+									const last = index === trail.length - 1;
+									const label = node.agentName ?? "session";
+									return (
+										<span key={node.id} class="flex shrink-0 items-center gap-1.5">
+											{index > 0 && <span class="opacity-50">/</span>}
+											{last ? (
+												<span class="font-medium opacity-100" aria-current="page">
+													{label}
+												</span>
+											) : (
+												<button
+													type="button"
+													class="link link-hover max-w-[14rem] truncate"
+													onClick={() => selectSession(node.id)}
+													title={node.title ?? node.id}
+												>
+													{label}
+												</button>
+											)}
+										</span>
+									);
+								})}
 							</nav>
-							<div class="min-h-0 flex-1">
-								<ActivityFeed
-									events={events}
+							<div class="flex min-h-0 flex-1">
+								<div class="min-h-0 min-w-0 flex-1">
+									<ActivityFeed
+										events={events}
+										sessions={sessions}
+										selected={selected}
+										onSelectSession={selectSession}
+										onOpenImage={setLightbox}
+									/>
+								</div>
+								<SubagentRail
+									session={selected}
 									sessions={sessions}
-									selected={selected}
-									onSelectSession={selectSession}
-									onOpenImage={setLightbox}
+									events={events}
+									onSelect={selectSession}
 								/>
 							</div>
 						</>
@@ -412,6 +640,91 @@ export function App() {
 					<PromptBar target={selected} onSend={handleSend} />
 				</main>
 			</div>
+			{takeoverTarget && (
+				<div class="modal modal-open" role="dialog" aria-modal="true" aria-labelledby="takeover-title">
+					<div class="modal-box max-w-md border border-base-300">
+						<h3 id="takeover-title" class="text-base font-semibold">
+							Take over this session?
+						</h3>
+						<p class="py-2 text-sm opacity-80">
+							{sessionLabel(takeoverTarget)} is still open in pi pid {takeoverTarget.ownerPid}. Stopping that pi
+							process and resuming the session in a new one lets you prompt it from the dashboard.
+						</p>
+						<p class="rounded-md bg-base-200 px-2 py-1 font-mono text-[11px] opacity-60">
+							pi --session {takeoverTarget.sessionFile ?? takeoverTarget.id}
+						</p>
+						<div class="modal-action">
+							<button type="button" class="btn btn-ghost btn-sm" onClick={() => setTakeoverTarget(null)}>
+								Cancel
+							</button>
+							<button
+								type="button"
+								class="btn btn-error btn-sm"
+								onClick={() => void confirmTakeOver()}
+								data-testid="takeover-confirm"
+							>
+								Stop pi and take over
+							</button>
+						</div>
+					</div>
+					<button
+						type="button"
+						class="modal-backdrop bg-black/50"
+						aria-label="Close"
+						onClick={() => setTakeoverTarget(null)}
+					/>
+				</div>
+			)}
+			{removeTarget && (
+				<div class="modal modal-open" role="dialog" aria-modal="true" aria-labelledby="remove-title">
+					<div class="modal-box max-w-md border border-base-300">
+						<h3 id="remove-title" class="text-base font-semibold">
+							Remove session?
+						</h3>
+						<p class="py-2 text-sm opacity-80">
+							{sessionLabel(removeTarget)} disappears from the dashboard
+							{removeTarget.parentSessionId ? "" : " together with its subagents"}.
+							{removeTarget.spawnId ? " Its pi process is stopped." : ""}
+						</p>
+						<label class="label cursor-pointer justify-start gap-2 rounded-md bg-base-200 px-2 py-1.5">
+							<input
+								type="checkbox"
+								class="checkbox checkbox-sm checkbox-error"
+								checked={removeFile}
+								onChange={(event) => setRemoveFile((event.target as HTMLInputElement).checked)}
+								data-testid="remove-file"
+							/>
+							<span class="text-xs">
+								Also delete the transcript file
+								<span class="ml-1 font-mono opacity-60">
+									{removeTarget.sessionFile ? basename(removeTarget.sessionFile) : "—"}
+								</span>
+							</span>
+						</label>
+						<div class="modal-action">
+							<button type="button" class="btn btn-ghost btn-sm" onClick={cancelRemove} disabled={removeBusy}>
+								Cancel
+							</button>
+							<button
+								type="button"
+								class="btn btn-error btn-sm"
+								onClick={() => void confirmRemove()}
+								disabled={removeBusy}
+								data-testid="remove-confirm"
+							>
+								{removeBusy && <span class="loading loading-spinner loading-xs" />}
+								Remove
+							</button>
+						</div>
+					</div>
+					<button
+						type="button"
+						class="modal-backdrop bg-black/50"
+						aria-label="Close"
+						onClick={cancelRemove}
+					/>
+				</div>
+			)}
 			<LightboxModal asset={lightbox} onClose={closeLightbox} />
 			<NewSessionModal
 				open={modalOpen}

@@ -27,7 +27,7 @@ export function PromptBar({ target, onSend, disabled = false }: PromptBarProps) 
 	const hint = !target
 		? "Select a session to send a prompt."
 		: target.source === "leech"
-			? "Leech-only session — attach a pi instance to send prompts"
+			? "Leech-only session — take it over to resume it in pi and prompt from here"
 			: null;
 	const label = target ? `Send to ${target.agentName ?? "session"}` : "Send";
 

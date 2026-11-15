@@ -6,7 +6,7 @@
  * prompt commands to/from pi instances.
  */
 import { createReadStream } from "node:fs";
-import { mkdir, readFile, stat } from "node:fs/promises";
+import { mkdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 import { WebSocket, WebSocketServer } from "ws";
 import { DEFAULT_HOST, DEFAULT_PORT, ENV, EVENT_HISTORY_LIMIT, WATCH_INTERVAL_MS, isPathInside, newId, num, str, truncate, } from "./protocol.js";
 import { SessionLeech } from "./leech.js";
+import { isPidAlive, killPid } from "./procs.js";
 import { parseSpawnRequest } from "./spawn.js";
 import { getCacheRoot, mimeForFile } from "./storage.js";
 const MAX_API_BODY_BYTES = 2 * 1024 * 1024;
@@ -25,7 +26,15 @@ const STALE_LEECH_MS = 120_000;
  * first, so waiting lets that event win the race against a socket close.
  */
 const INSTANCE_DISCONNECT_GRACE_MS = 5_000;
-const DEFAULT_LEECH_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_LEECH_MAX_AGE_MS = 15 * 60 * 1000;
+/**
+ * How recently a session must have written for a running-but-idle owner to look
+ * busy. `pendingTurn` from the transcript is the primary signal; this window
+ * covers the gap between an event being written and the parser seeing it.
+ */
+const OWNER_BUSY_WINDOW_MS = 5_000;
+/** How long a takeover waits for a stopped pi process to release its session. */
+const TAKEOVER_STOP_MS = 4_000;
 const HEARTBEAT_INTERVAL_MS = 30_000;
 const SNAPSHOT_GRACE_MS = 25;
 const CONTENT_SECURITY_POLICY = "default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ws: wss:; font-src 'self' data:; object-src 'none'; base-uri 'none'";
@@ -131,6 +140,9 @@ function sendHtml(res, status, html, cacheControl) {
     });
     res.end(html);
 }
+function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
 function sendMethodNotAllowed(res, allow) {
     sendJson(res, 405, { ok: false, error: "method not allowed" }, { Allow: allow });
 }
@@ -235,6 +247,8 @@ export class WebappServer {
     leech;
     leechEnabled;
     leechDirs;
+    leechMaxAgeMs;
+    ownerProbe;
     leechError = null;
     localPromptHandler = null;
     spawner = null;
@@ -246,6 +260,8 @@ export class WebappServer {
     stopInFlight = null;
     heartbeatTimer = null;
     sessions = new Map();
+    /** Sessions the operator removed; they stay hidden even if they keep talking. */
+    removedSessions = new Set();
     events = [];
     owners = new Map();
     instanceSessions = new Map();
@@ -262,6 +278,14 @@ export class WebappServer {
                 : DEFAULT_PORT;
         this.webRoot = path.resolve(options.webRoot ?? DEFAULT_WEB_ROOT);
         this.artifactsRoot = path.resolve(options.artifactsRoot ?? getCacheRoot());
+        this.ownerProbe = options.ownerProbe;
+        const envMaxAge = Number(process.env[ENV.leechMaxAge] ?? "");
+        const requestedMaxAge = options.leech && options.leech.maxAgeMs && options.leech.maxAgeMs > 0
+            ? options.leech.maxAgeMs
+            : Number.isFinite(envMaxAge) && envMaxAge > 0
+                ? Math.floor(envMaxAge)
+                : DEFAULT_LEECH_MAX_AGE_MS;
+        this.leechMaxAgeMs = Math.max(30_000, requestedMaxAge);
         const leechOptions = options.leech === false ? null : options.leech;
         if (options.leech === false) {
             this.leechEnabled = false;
@@ -288,9 +312,7 @@ export class WebappServer {
             const intervalMs = leechOptions?.intervalMs && leechOptions.intervalMs > 0
                 ? leechOptions.intervalMs
                 : WATCH_INTERVAL_MS;
-            const maxAgeMs = leechOptions?.maxAgeMs && leechOptions.maxAgeMs > 0
-                ? leechOptions.maxAgeMs
-                : DEFAULT_LEECH_MAX_AGE_MS;
+            const maxAgeMs = this.leechMaxAgeMs;
             try {
                 leech = new SessionLeech({
                     dirs: this.leechDirs,
@@ -352,6 +374,7 @@ export class WebappServer {
     }
     async startInternal() {
         await mkdir(this.artifactsRoot, { recursive: true }).catch(() => undefined);
+        await this.loadRemovedSessions();
         await new Promise((resolve, reject) => {
             const onError = (error) => {
                 this.httpServer.off("listening", onListening);
@@ -451,6 +474,8 @@ export class WebappServer {
         const sessionId = event.sessionId.trim();
         if (!sessionId)
             return;
+        if (this.removedSessions.has(sessionId))
+            return;
         const source = event.source === "leech" ? "leech" : "live";
         const existing = this.sessions.get(sessionId);
         if (source === "leech" && existing?.source === "live")
@@ -488,8 +513,10 @@ export class WebappServer {
                 const spawn = this.spawner.get(spawnId);
                 if (spawn) {
                     this.spawner.attachSession(spawnId, normalized.sessionId);
-                    if (primary)
+                    if (primary) {
                         primary.spawnId = spawnId;
+                        delete primary.takeoverSpawnId;
+                    }
                     this.notifySpawnChange({ ...spawn });
                     const prompt = this.initialPrompts.get(spawnId);
                     if (prompt) {
@@ -532,14 +559,138 @@ export class WebappServer {
             defaultCwd: this.spawner.defaultWorkingDir,
         };
     }
+    /**
+     * Live-process view of a session: which pi pids own it and whether one of
+     * them looks busy. Only leeched sessions need this — live ones are ours.
+     */
+    ownerInfo(node) {
+        if (node.source === "live")
+            return { pids: [], pending: false, busy: false };
+        const leech = this.leech;
+        const probe = this.ownerProbe ?? (leech ? (id) => leech.sessionRuntime(id) : null);
+        let probeResult = null;
+        if (probe) {
+            try {
+                probeResult = probe(node.id, node.sessionFile);
+            }
+            catch {
+                probeResult = null;
+            }
+        }
+        const pids = probeResult?.pids ?? [];
+        const pending = probeResult?.pending ?? false;
+        const recent = Number.isFinite(node.updatedAt) && Date.now() - node.updatedAt <= OWNER_BUSY_WINDOW_MS;
+        return { pids, pending, busy: pending || (pids.length > 0 && recent) };
+    }
+    /**
+     * Removes a session (and its subagents) from the dashboard. Running pi
+     * processes started here are stopped first; transcripts are only unlinked
+     * when explicitly requested.
+     */
+    async removeSession(sessionId, options = {}) {
+        const node = this.sessions.get(sessionId);
+        if (!node)
+            throw new HttpError(404, "session not found");
+        const removed = new Set([sessionId]);
+        for (const candidate of this.sessions.values()) {
+            if (candidate.parentSessionId === sessionId)
+                removed.add(candidate.id);
+        }
+        const spawner = this.spawner;
+        if (spawner) {
+            for (const id of removed) {
+                const spawnId = this.sessions.get(id)?.spawnId;
+                if (!spawnId)
+                    continue;
+                try {
+                    await spawner.stop(spawnId);
+                }
+                catch {
+                    /* the process is already gone */
+                }
+            }
+        }
+        let deletedFile;
+        for (const id of removed) {
+            const target = this.sessions.get(id);
+            this.sessions.delete(id);
+            this.owners.delete(id);
+            this.removedSessions.add(id);
+            this.pendingSessionCommands.delete(id);
+            for (const ids of this.instanceSessions.values())
+                ids.delete(id);
+            if (options.deleteFile && target?.sessionFile && target.sessionFile.endsWith(".jsonl")) {
+                try {
+                    await unlink(target.sessionFile);
+                    deletedFile = target.sessionFile;
+                }
+                catch {
+                    /* missing file: nothing to delete */
+                }
+            }
+        }
+        for (let index = this.events.length - 1; index >= 0; index -= 1) {
+            const event = this.events[index];
+            if (event && removed.has(event.sessionId))
+                this.events.splice(index, 1);
+        }
+        // Keep the tombstone list bounded.
+        while (this.removedSessions.size > 500) {
+            const oldest = this.removedSessions.values().next().value;
+            if (typeof oldest !== "string")
+                break;
+            this.removedSessions.delete(oldest);
+        }
+        await this.persistRemovedSessions();
+        this.broadcast({ type: "session_removed", sessionIds: [...removed] });
+        return { removed: [...removed], deletedFile };
+    }
+    removedSessionsPath() {
+        return path.join(this.artifactsRoot, ".removed-sessions.json");
+    }
+    async loadRemovedSessions() {
+        try {
+            const raw = await readFile(this.removedSessionsPath(), "utf8");
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) {
+                for (const value of parsed)
+                    if (typeof value === "string")
+                        this.removedSessions.add(value);
+            }
+        }
+        catch {
+            /* no tombstones yet */
+        }
+    }
+    async persistRemovedSessions() {
+        try {
+            await writeFile(this.removedSessionsPath(), JSON.stringify([...this.removedSessions].slice(-500)));
+        }
+        catch {
+            /* the dashboard still works without persistence */
+        }
+    }
     /** Broadcasts spawn state to every connected browser. */
     notifySpawnChange(record) {
         const state = this.getSpawnState();
         if (record) {
             const fresh = state.spawns.find((item) => item.spawnId === record.spawnId) ?? record;
             this.broadcast({ type: "spawn", spawn: { ...fresh } });
+            if (fresh.status === "exited" || fresh.status === "failed")
+                this.clearTakeover(fresh.spawnId);
         }
         this.broadcast({ type: "spawns", state });
+    }
+    /** Drops a pending takeover marker once its spawn is no longer in flight. */
+    clearTakeover(spawnId) {
+        for (const node of this.sessions.values()) {
+            if (this.removedSessions.has(node.id))
+                continue;
+            if (node.takeoverSpawnId !== spawnId)
+                continue;
+            delete node.takeoverSpawnId;
+            this.broadcast({ type: "session", session: { ...node } });
+        }
     }
     getState() {
         const now = Date.now();
@@ -558,6 +709,21 @@ export class WebappServer {
                 now - node.updatedAt > STALE_LEECH_MS) {
                 node.status = "completed";
                 node.endedAt = node.endedAt ?? node.updatedAt;
+            }
+            if (node.source === "leech") {
+                const info = this.ownerInfo(node);
+                if (info.pids.length > 0)
+                    node.ownerPid = info.pids[0];
+                else
+                    delete node.ownerPid;
+                if (info.busy)
+                    node.ownerBusy = true;
+                else
+                    delete node.ownerBusy;
+            }
+            else {
+                delete node.ownerPid;
+                delete node.ownerBusy;
             }
         }
         sessions.sort((a, b) => a.startedAt - b.startedAt || a.id.localeCompare(b.id));
@@ -581,6 +747,8 @@ export class WebappServer {
                 dirs: [],
                 files: 0,
                 sessions: 0,
+                skippedStale: 0,
+                maxAgeMs: this.leechMaxAgeMs,
             };
             if (this.leechError)
                 status.lastError = this.leechError;
@@ -593,6 +761,8 @@ export class WebappServer {
                 dirs: this.leechDirs,
                 files: 0,
                 sessions: 0,
+                skippedStale: 0,
+                maxAgeMs: this.leechMaxAgeMs,
             };
             if (this.leechError)
                 status.lastError = this.leechError;
@@ -611,6 +781,8 @@ export class WebappServer {
                 dirs: this.leechDirs,
                 files: 0,
                 sessions: 0,
+                skippedStale: 0,
+                maxAgeMs: this.leechMaxAgeMs,
                 lastError: this.leechError ?? `leech status failed: ${errorMessage(error)}`,
             };
             return status;
@@ -1164,6 +1336,20 @@ export class WebappServer {
                 await this.handlePromptPost(req, res, promptMatch[1]);
                 return;
             }
+            const removeMatch = /^\/api\/sessions\/([^/]+)$/.exec(pathname);
+            if (removeMatch) {
+                if (method !== "DELETE")
+                    return sendMethodNotAllowed(res, "DELETE");
+                await this.handleRemoveSession(req, res, removeMatch[1]);
+                return;
+            }
+            const takeoverMatch = /^\/api\/sessions\/([^/]+)\/takeover$/.exec(pathname);
+            if (takeoverMatch) {
+                if (method !== "POST")
+                    return sendMethodNotAllowed(res, "POST");
+                await this.handleTakeoverPost(req, res, takeoverMatch[1]);
+                return;
+            }
             if (pathname === "/api/spawn") {
                 if (method === "GET") {
                     sendJson(res, 200, this.getSpawnState());
@@ -1224,6 +1410,19 @@ export class WebappServer {
             }
         }
     }
+    async handleRemoveSession(req, res, encodedSessionId) {
+        let sessionId;
+        try {
+            sessionId = decodeURIComponent(encodedSessionId);
+        }
+        catch {
+            throw new HttpError(400, "invalid session id");
+        }
+        const payload = await readJsonBody(req, MAX_API_BODY_BYTES);
+        const deleteFile = isRecord(payload) && payload.deleteFile === true;
+        const result = await this.removeSession(sessionId, { deleteFile });
+        sendJson(res, 200, { ok: true, ...result });
+    }
     async handleEventsPost(req, res) {
         const payload = await readJsonBody(req, MAX_API_BODY_BYTES);
         if (payload === undefined) {
@@ -1280,6 +1479,147 @@ export class WebappServer {
         }
         this.notifySpawnChange(record);
         sendJson(res, 201, { ok: true, spawn: record });
+    }
+    /**
+     * Resumes a leeched session in a fresh pi process so it becomes live and can
+     * be prompted. Refused for subagents, live sessions and busy owners; when an
+     * idle pi process still holds the session, callers must opt in to stopping
+     * it with `{ kill: true }` before the takeover proceeds.
+     */
+    async handleTakeoverPost(req, res, encodedSessionId) {
+        let sessionId;
+        try {
+            sessionId = decodeURIComponent(encodedSessionId);
+        }
+        catch {
+            throw new HttpError(400, "invalid session id");
+        }
+        if (!sessionId)
+            throw new HttpError(400, "invalid session id");
+        const node = this.sessions.get(sessionId);
+        if (!node) {
+            sendJson(res, 404, { ok: false, error: "session not found" });
+            return;
+        }
+        if (node.source === "live") {
+            sendJson(res, 409, { ok: false, code: "live", error: "session is already live" });
+            return;
+        }
+        if (node.isSubagent) {
+            sendJson(res, 409, {
+                ok: false,
+                code: "subagent",
+                error: "subagent sessions cannot be taken over",
+            });
+            return;
+        }
+        const spawner = this.spawner;
+        if (!spawner || !spawner.enabled) {
+            sendJson(res, 403, {
+                ok: false,
+                error: "spawning is not available on this dashboard",
+            });
+            return;
+        }
+        if (!node.sessionFile) {
+            sendJson(res, 400, {
+                ok: false,
+                error: "session file is unknown, so this session cannot be resumed",
+            });
+            return;
+        }
+        if (node.takeoverSpawnId) {
+            const inFlight = spawner.get(node.takeoverSpawnId);
+            if (inFlight && (inFlight.status === "starting" || inFlight.status === "running")) {
+                sendJson(res, 409, {
+                    ok: false,
+                    code: "takeover-pending",
+                    error: "a takeover is already starting for this session",
+                });
+                return;
+            }
+        }
+        const payload = await readJsonBody(req, MAX_API_BODY_BYTES);
+        const body = isRecord(payload) ? payload : {};
+        if (body.prompt !== undefined && typeof body.prompt !== "string") {
+            throw new HttpError(400, "prompt must be a string");
+        }
+        const prompt = typeof body.prompt === "string" && body.prompt.length > 0
+            ? body.prompt.slice(0, MAX_PROMPT_LENGTH)
+            : undefined;
+        let killedPid;
+        const owner = this.ownerInfo(node);
+        if (owner.pids.length > 0) {
+            const pid = owner.pids[0];
+            if (owner.busy) {
+                sendJson(res, 409, {
+                    ok: false,
+                    code: "owner-busy",
+                    pid,
+                    error: `session is busy in pi pid ${pid}; wait for the current turn to finish`,
+                });
+                return;
+            }
+            if (body.kill !== true) {
+                sendJson(res, 409, {
+                    ok: false,
+                    code: "owner-running",
+                    pid,
+                    canKill: true,
+                    error: `session is still open in pi pid ${pid}`,
+                });
+                return;
+            }
+            // Re-check immediately before signalling: the owner may have changed.
+            const confirmed = this.ownerInfo(node);
+            if (!confirmed.pids.includes(pid)) {
+                sendJson(res, 409, {
+                    ok: false,
+                    code: "owner-changed",
+                    error: "the owning pi process changed; refresh and try again",
+                });
+                return;
+            }
+            killPid(pid, "SIGTERM");
+            const deadline = Date.now() + TAKEOVER_STOP_MS;
+            while (Date.now() < deadline && isPidAlive(pid))
+                await sleep(100);
+            if (isPidAlive(pid)) {
+                killPid(pid, "SIGKILL");
+                const hardDeadline = Date.now() + 1_500;
+                while (Date.now() < hardDeadline && isPidAlive(pid))
+                    await sleep(100);
+            }
+            if (isPidAlive(pid)) {
+                sendJson(res, 409, {
+                    ok: false,
+                    code: "owner-stuck",
+                    pid,
+                    error: `could not stop pi pid ${pid}`,
+                });
+                return;
+            }
+            killedPid = pid;
+        }
+        let record;
+        try {
+            record = await spawner.spawn({
+                cwd: node.cwd ?? spawner.defaultWorkingDir ?? process.cwd(),
+                sessionFile: node.sessionFile,
+                targetSessionId: node.id,
+                prompt,
+            });
+        }
+        catch (error) {
+            const status = isRecord(error) && typeof error.status === "number" ? error.status : 500;
+            throw new HttpError(status, errorMessage(error));
+        }
+        if (killedPid !== undefined)
+            record.killedPid = killedPid;
+        node.takeoverSpawnId = record.spawnId;
+        this.notifySpawnChange({ ...record });
+        this.broadcast({ type: "session", session: { ...node } });
+        sendJson(res, 202, { ok: true, spawn: record, killedPid });
     }
     async handleSpawnItem(res, method, encodedSpawnId, wantLog) {
         let spawnId;

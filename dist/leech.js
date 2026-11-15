@@ -6,11 +6,12 @@
  * Live in-process events remain authoritative in the server; leeched events are
  * always marked with source "leech" so consumers can prefer live data.
  */
+import { scanPiSessionOwners, sessionIdFromSessionFile } from "./procs.js";
 import { open, readdir, stat as statFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { clearInterval, setInterval } from "node:timers";
 import { bool, makeEvent, num, str, truncate, WATCH_INTERVAL_MS, } from "./protocol.js";
-const DEFAULT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_MAX_AGE_MS = 15 * 60 * 1000;
 const DEFAULT_REPLAY_LIMIT = 40;
 const MAX_SCAN_DEPTH = 4;
 const MAX_FILES = 5000;
@@ -193,6 +194,9 @@ export class SessionLeech {
     lastScanAt;
     lastError;
     malformedLines = 0;
+    skippedStale = 0;
+    ownersBySession = new Map();
+    pendingBySession = new Map();
     constructor(options) {
         this.dirs = normalizeDirs(options.dirs);
         this.intervalMs =
@@ -212,6 +216,20 @@ export class SessionLeech {
     }
     get running() {
         return this.timer !== null;
+    }
+    /** Freshness window applied to session files that no live process owns. */
+    get maxAge() {
+        return this.maxAgeMs;
+    }
+    /**
+     * Live-process view of a session: which `pi` pids own it, and whether the
+     * transcript ends inside a turn (so killing the owner would lose work).
+     */
+    sessionRuntime(sessionId) {
+        return {
+            pids: this.ownersBySession.get(sessionId) ?? [],
+            pending: this.pendingBySession.get(sessionId) ?? false,
+        };
     }
     start() {
         if (this.timer)
@@ -253,6 +271,8 @@ export class SessionLeech {
             dirs: [...this.dirs],
             files: this.files.size,
             sessions: this.sessionIds.size,
+            skippedStale: this.skippedStale,
+            maxAgeMs: this.maxAgeMs,
         };
         if (this.lastScanAt !== undefined)
             status.lastScanAt = this.lastScanAt;
@@ -273,7 +293,21 @@ export class SessionLeech {
     }
     async scan() {
         const now = Date.now();
-        const listing = await this.collectFiles(now);
+        // One /proc pass per scan: it decides both which stale files stay and
+        // which running pi process owns a session (used by takeover).
+        const owners = scanPiSessionOwners();
+        this.ownersBySession = owners.pids;
+        const { recent, stale } = await this.collectFiles(now);
+        const listing = new Map(recent);
+        let skipped = 0;
+        for (const [filePath, fileStat] of stale) {
+            const sessionId = sessionIdFromSessionFile(filePath) ?? this.files.get(filePath)?.sessionId ?? null;
+            if (sessionId && owners.pids.has(sessionId))
+                listing.set(filePath, fileStat);
+            else
+                skipped += 1;
+        }
+        this.skippedStale = skipped;
         // Pre-pass: resolve every file's session header before emitting anything so
         // parentSession (an absolute file path) can be mapped to a session id.
         const headers = new Map();
@@ -308,19 +342,24 @@ export class SessionLeech {
                 this.recordError(error, `leech ${filePath}`);
             }
         }
+        this.pendingBySession.clear();
+        for (const state of this.files.values()) {
+            if (state.pendingTurn !== undefined)
+                this.pendingBySession.set(state.sessionId, state.pendingTurn);
+        }
         this.lastScanAt = Date.now();
     }
     async collectFiles(now) {
-        const files = new Map();
+        const files = { recent: new Map(), stale: new Map() };
         for (const dir of this.dirs) {
             await this.walk(dir, 0, now, files);
-            if (files.size >= MAX_FILES)
+            if (files.recent.size + files.stale.size >= MAX_FILES)
                 break;
         }
         return files;
     }
     async walk(dir, depth, now, out) {
-        if (out.size >= MAX_FILES)
+        if (out.recent.size + out.stale.size >= MAX_FILES)
             return;
         let entries;
         try {
@@ -331,7 +370,7 @@ export class SessionLeech {
             return;
         }
         for (const entry of entries) {
-            if (out.size >= MAX_FILES)
+            if (out.recent.size + out.stale.size >= MAX_FILES)
                 return;
             if (entry.isSymbolicLink())
                 continue;
@@ -348,8 +387,9 @@ export class SessionLeech {
                 if (!fileStat.isFile())
                     continue;
                 if (now - fileStat.mtimeMs > this.maxAgeMs)
-                    continue;
-                out.set(fullPath, fileStat);
+                    out.stale.set(fullPath, fileStat);
+                else
+                    out.recent.set(fullPath, fileStat);
             }
             catch {
                 // Vanished or unreadable files are simply skipped.
@@ -506,12 +546,16 @@ export class SessionLeech {
             return;
         const role = str(message.role);
         if (role === "user") {
+            state.pendingTurn = true;
             const text = truncate(contentText(message.content), MAX_PROMPT_CHARS);
             this.deliver(state, this.makeEvent(state, "user_prompt", timestamp, { text }));
             return;
         }
         if (role === "assistant") {
             const parts = assistantParts(message.content);
+            // A finished assistant message without tool calls closes the turn;
+            // tool calls mean the agent is still working.
+            state.pendingTurn = parts.toolCalls.length > 0;
             const model = modelLabel(str(message.provider), str(message.model));
             if (model)
                 state.model = model;
@@ -538,6 +582,7 @@ export class SessionLeech {
             return;
         }
         if (role === "toolResult") {
+            state.pendingTurn = true;
             this.deliver(state, this.makeEvent(state, "tool_end", timestamp, {
                 toolCallId: str(message.toolCallId),
                 toolName: str(message.toolName),

@@ -13,7 +13,10 @@ A browser dashboard for [pi](https://github.com/earendil-works/pi) coding-agent 
 - **Multi-instance dashboard** — run several `pi` processes at once; the first one binds `8787`, the rest register as instances and route prompts over the WebSocket.
 - **Standalone daemon** — `pi-webapp serve` runs the dashboard without a `pi` process: always-on, leeching session files, accepting `pi` instances as they join, and starting new sessions from the browser.
 - **Autostart** — installing the package registers a systemd user service (falling back to the first `pi` run when npm skips install scripts), so the dashboard is already up at login and keeps running after every `pi` exits.
-- **Session leeching** — pi sessions started *without* the extension (plain CLI runs, older versions) are tailed straight from `~/.pi/agent/sessions` and appear as read-only feed entries.
+- **Session leeching** — pi sessions started *without* the extension (plain CLI runs, older versions) are tailed straight from `~/.pi/agent/sessions` and appear as read-only feed entries. Transcripts are only picked up when they are recent or owned by a running `pi` process, so a directory full of finished sessions stays quiet.
+- **Navigation and focus** — every session has a deep link (`#/s/<sessionId>`), the sidebar has a filter box and status chips, and a sticky **expand all** toggle opens the whole tree (persisted per browser).
+- **Separate subagent output** — subagents report into their own right-hand rail with live status and their latest message, so their turn-by-turn chatter no longer interleaves with the main agent's feed. The parent feed keeps the spawn/completion cards and any `post_work_state` they post.
+- **Take over and remove** — a leeched session can be resumed in a fresh `pi` process (`pi --session <file>`) and prompted from the browser; sessions can be removed from the dashboard, optionally deleting their transcript. Subagents are never taken over.
 - **Agent tools** — two tools agents can call on their own: `post_work_state` (milestone + screenshot/recording) and `capture_playwright_snapshot` (headless browser screenshot of a dev server).
 - **Local-first UI** — Preact frontend, Tailwind CSS v4 and daisyUI, dark by default, no external fonts, scripts or telemetry.
 - **No built-in auth, by design** — the server binds loopback only. Exposing it beyond your machine is your call; see [Security](#security) and [Running behind a reverse proxy](#running-behind-a-reverse-proxy).
@@ -188,6 +191,14 @@ Requirements:
 - The spawned `pi` must load the `pi-webapp` extension (`pi install git:github.com/luxuride-pi-extensions/pi-webapp`). Otherwise the process starts but never joins the dashboard, and the initial prompt stays queued.
 - Spawning only works on the primary instance (the one that owns the HTTP server) and only when it is bound to a loopback address (`127.0.0.1`, `localhost`, `::1`). A secondary instance or a non-loopback bind answers `403`; disable spawning entirely with `PI_WEBAPP_SPAWN=0` or `--no-spawn`.
 
+### Taking over and removing sessions
+
+Leeched sessions are read-only until you take them over.
+
+- **Take over** (`↻` in the sidebar, or the header button) resumes the session in a new `pi --mode rpc --session <file>` process, so the history stays and the session id is unchanged. Ownership is detected by scanning `/proc/<pid>/environ` for `PI_SESSION_ID` together with a `pi` argv0 — a session is refused while its owner is mid-turn (`409 owner-busy`). When the owner is alive but idle, the dashboard asks before stopping that `pi` process and taking its place; the owning pid is shown in the sidebar as `pid N`.
+- **Subagents are never taken over** (`409 subagent`) and neither are live sessions (`409 live`).
+- **Remove** (`⌫`, or the header button) hides a session and its subagents from the dashboard and writes a tombstone to `~/.pi/cache/pi-webapp/.removed-sessions.json`, so later events and rescans do not bring it back. Dashboard-started processes are stopped first. Tick *Also delete the transcript file* to unlink the `*.jsonl` as well — that is permanent.
+
 > **Caveat: spawned sessions inherit the dashboard's environment** — `PATH`, proxies, API keys, `PI_*` configuration and anything else the daemon was started with. They run with the privileges of the user running the dashboard. Starting a session is equivalent to running `pi` in that user's shell, so anyone who can reach the dashboard can do it. See [Security](#security).
 
 ## Build from source
@@ -221,6 +232,7 @@ The extension is configured through environment variables — extension mode has
 | `PI_WEBAPP_CACHE_DIR` | `~/.pi/cache/pi-webapp` | Artifact cache root (one subdirectory per session). |
 | `PI_WEBAPP_LEECH` | `1` | `0` disables session leeching entirely. |
 | `PI_WEBAPP_LEECH_DIR` | `~/.pi/agent/sessions` | Colon-separated list of session directories to tail. |
+| `PI_WEBAPP_LEECH_MAX_AGE_MS` | `900000` | Transcripts older than this are skipped unless a running `pi` process still owns them (minimum `30000`). |
 | `PI_WEBAPP_PLAYWRIGHT` | *(auto-detected)* | Path to the Playwright CLI used by `capture_playwright_snapshot`. |
 | `PI_WEBAPP_SPAWN` | `1` | `0`, `false` or `off` disables starting sessions from the dashboard. |
 | `PI_WEBAPP_PI_BIN` | *(auto-detected)* | `pi` executable used for sessions started from the dashboard. |
@@ -391,7 +403,7 @@ Only the port owner can start sessions: the daemon and an extension-primary both
 
 One endpoint, `/ws`, two roles.
 
-Server → client: `snapshot` (full state on connect), `event`, `session`, `spawn`, `spawns`, `command`, `hello_ok`, `pong`.
+Server → client: `snapshot` (full state on connect), `event`, `session`, `session_removed`, `spawn`, `spawns`, `command`, `hello_ok`, `pong`.
 Client → server: `hello` (`role: "ui" | "instance"`, optional `instanceId`), `command_ack`, `ping`.
 
 ### HTTP API
@@ -402,7 +414,9 @@ Client → server: `hello` (`role: "ui" | "instance"`, optional `instanceId`), `
 | `GET` | `/api/health` | Liveness probe, `{ "ok": true }`. |
 | `POST` | `/api/events` | Ingest an event: `{ instanceId, event }`. Used by instances and the extension. |
 | `POST` | `/api/sessions/:sessionId/prompt` | Send a prompt to a session. `200 { ok, delivered: "local" }`, `202` when routed to another instance, `409` for leech-only sessions, `404` for unknown ids. |
-| `GET` | `/api/leech` | Leech status: `enabled`, `running`, `dirs`, `files`, `sessions`, `lastScanAt`, `lastError`. |
+| `POST` | `/api/sessions/:sessionId/takeover` | Resume a leeched session in a new `pi` process: `202 { ok, spawn, killedPid? }`; `409 live`, `409 subagent`, `409 owner-busy`, `409 owner-running` (`{ code, canKill: true, pid }` — resend with `{ kill: true }`), `409 takeover-pending`, `403` when spawning is disabled. |
+| `DELETE` | `/api/sessions/:sessionId` | Remove a session and its subagents from the dashboard. Body `{ deleteFile?: boolean }` also unlinks the transcript. `200 { ok, removed, deletedFile? }`, `404` for unknown ids. |
+| `GET` | `/api/leech` | Leech status: `enabled`, `running`, `dirs`, `files`, `sessions`, `skippedStale`, `maxAgeMs`, `lastScanAt`, `lastError`. |
 | `POST` | `/api/leech/scan` | Force a rescan of the configured session directories. |
 | `GET` | `/api/spawn` | Spawn state: `{ enabled, spawns, defaultCwd? }`. |
 | `POST` | `/api/spawn` | Start a `pi` session: `{ cwd, prompt?, model?, agentName?, sessionFile?, extraArgs? }`. `201 { ok, spawn }`, `403` when spawning is disabled, `400` for an invalid request (cwd must be absolute and exist). |
@@ -430,7 +444,7 @@ Run as many `pi` processes as you like; they cooperate around one dashboard:
 - **Election** — the first process to bind `PI_WEBAPP_PORT` becomes the primary and owns the server. Later processes find the port taken, connect to the primary as an instance and keep working. The [standalone daemon](#standalone-daemon) can be that primary too.
 - **Prompt routing** — the server tracks which instance owns each session. A prompt for a session owned by the primary goes to the local handler (`delivered: "local"`); a prompt for a session owned by another instance is pushed as a `command` over that instance's socket (`202`, `delivered: "instance"`) and acknowledged with `command_ack`.
 - **Spawning** — the primary can start new `pi` processes; those sessions join as instances and are tagged with their spawn id. Only a loopback-bound primary allows it (see [Starting sessions from the dashboard](#starting-sessions-from-the-dashboard)).
-- **Leeching** — sessions run without the extension still show up when their project directory is covered by `PI_WEBAPP_LEECH_DIR`. Leech sessions are read-only: prompting one answers `409`, because there is no live process to steer.
+- **Leeching** — sessions run without the extension still show up when their project directory is covered by `PI_WEBAPP_LEECH_DIR`. Leech sessions are read-only until taken over: prompting one answers `409`, because there is no live process to steer; `POST /api/sessions/:id/takeover` resumes it in a new `pi` process instead.
 
 The dashboard does not care which process is primary — the browser always talks to `http://127.0.0.1:8787`.
 

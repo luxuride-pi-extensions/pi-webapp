@@ -68,7 +68,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function withTimeout(promise, ms, label) {
 	let timer;
-	const timeout = new Promise((resolve, reject) => {
+	const timeout = new Promise((_, reject) => {
 		timer = setTimeout(() => reject(new Error(`timed out after ${ms}ms waiting for ${label}`)), ms);
 	});
 	return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
@@ -617,13 +617,49 @@ try {
 		body: JSON.stringify({ cwd: spawnCwd }),
 	});
 	assert.equal(disabledSpawnResponse.status, 403, "POST /api/spawn without a spawner must answer 403");
+
+	step("10. session removal");
+	const unknownRemove = await fetch(`${baseUrl}/api/sessions/does-not-exist`, { method: "DELETE" });
+	assert.equal(unknownRemove.status, 404, "DELETE /api/sessions/:id for an unknown id must answer 404");
+
+	const removeSpawned = await fetch(`${baseUrl}/api/sessions/${encodeURIComponent(spawnSessionId)}`, {
+		method: "DELETE",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ deleteFile: false }),
+	});
+	assert.equal(removeSpawned.status, 200, "DELETE /api/sessions/:id");
+	const removeBody = await removeSpawned.json();
+	assert.equal(removeBody.ok, true, "removal reports ok");
+	assert.ok(Array.isArray(removeBody.removed) && removeBody.removed.includes(spawnSessionId), "removal lists the id");
+	assert.equal(removeBody.deletedFile, undefined, "removal keeps the transcript unless asked to delete it");
+
+	const afterRemoval = await (await fetch(`${baseUrl}/api/state`)).json();
+	assert.ok(
+		!afterRemoval.sessions.some((session) => session.id === spawnSessionId),
+		"removed session disappears from the state",
+	);
+	assert.ok(
+		!afterRemoval.events.some((event) => event.sessionId === spawnSessionId),
+		"removed session's events disappear from the state",
+	);
+
+	// Tombstones keep a removed session from coming back through ingest.
+	await postEvent(
+		"local-1",
+		makeEvent("session_started", spawnSessionId, { data: { cwd: spawnCwd, title: "Back again" } }),
+	);
+	const afterRevive = await (await fetch(`${baseUrl}/api/state`)).json();
+	assert.ok(
+		!afterRevive.sessions.some((session) => session.id === spawnSessionId),
+		"a removed session is not re-added by later events",
+	);
 } catch (error) {
 	exitCode = 1;
 	console.error(`\n✗ SMOKE FAILED at step "${currentStep}":`);
 	console.error(error?.stack ?? String(error));
 } finally {
 	clearTimeout(watchdog);
-	step("10. cleanup");
+	step("11. cleanup");
 	try {
 		await cleanup();
 	} catch (error) {

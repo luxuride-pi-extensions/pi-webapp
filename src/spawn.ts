@@ -265,6 +265,7 @@ export class SessionSpawner {
 			sessionFile: request.sessionFile,
 			logFile,
 		};
+		if (request.targetSessionId) record.targetSessionId = request.targetSessionId;
 
 		let log: WriteStream | null = null;
 		try {

@@ -22,6 +22,8 @@ function toLeechStatus(value) {
         dirs,
         files: typeof record.files === "number" ? record.files : 0,
         sessions: typeof record.sessions === "number" ? record.sessions : 0,
+        skippedStale: typeof record.skippedStale === "number" ? record.skippedStale : 0,
+        maxAgeMs: typeof record.maxAgeMs === "number" ? record.maxAgeMs : 0,
     };
     if (typeof record.lastScanAt === "number")
         status.lastScanAt = record.lastScanAt;

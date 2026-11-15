@@ -18,6 +18,7 @@ export const ENV = {
 	cacheDir: "PI_WEBAPP_CACHE_DIR",
 	leech: "PI_WEBAPP_LEECH",
 	leechDir: "PI_WEBAPP_LEECH_DIR",
+	leechMaxAge: "PI_WEBAPP_LEECH_MAX_AGE_MS",
 	playwright: "PI_WEBAPP_PLAYWRIGHT",
 	/** Set to 0 to forbid the dashboard from launching pi processes. */
 	spawn: "PI_WEBAPP_SPAWN",
@@ -118,6 +119,12 @@ export interface SessionNode {
 	lastEventType?: WebappEventType;
 	/** Set when the dashboard launched this session's pi process. */
 	spawnId?: string;
+	/** PID of the `pi` process that currently owns this session, when detectable. */
+	ownerPid?: number;
+	/** True while that process appears to be in the middle of a turn. */
+	ownerBusy?: boolean;
+	/** Spawn created by a "take over" request, until the resumed session registers. */
+	takeoverSpawnId?: string;
 }
 
 export type SpawnStatus = "starting" | "running" | "exited" | "failed";
@@ -130,6 +137,8 @@ export interface SpawnRequest {
 	agentName?: string;
 	sessionFile?: string;
 	extraArgs?: string[];
+	/** Set for takeover spawns: the session id this process must register as. */
+	targetSessionId?: string;
 }
 
 /** A pi process started by the dashboard ("New session"). */
@@ -148,6 +157,10 @@ export interface SpawnRecord {
 	sessionFile?: string;
 	logFile?: string;
 	error?: string;
+	/** Set for takeover spawns: the session id this process must register as. */
+	targetSessionId?: string;
+	/** PID stopped to free the session, when a takeover had to kill a process. */
+	killedPid?: number;
 }
 
 export interface SpawnState {
@@ -178,6 +191,10 @@ export interface LeechStatus {
 	dirs: string[];
 	files: number;
 	sessions: number;
+	/** Sessions skipped because they are stale and no live pi process owns them. */
+	skippedStale: number;
+	/** Freshness window for a session file without an owning process. */
+	maxAgeMs: number;
 	lastScanAt?: number;
 	lastError?: string;
 }
@@ -216,6 +233,7 @@ export type ServerToClientMessage =
 	| { type: "session"; session: SessionNode }
 	| { type: "spawn"; spawn: SpawnRecord }
 	| { type: "spawns"; state: SpawnState }
+	| { type: "session_removed"; sessionIds: string[] }
 	| { type: "command"; command: PromptCommand }
 	| { type: "hello_ok"; instanceId: string }
 	| { type: "pong" };
