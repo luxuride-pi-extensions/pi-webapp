@@ -39,30 +39,6 @@ Requires **Node.js >= 22.19** and a `pi` with extension support (1.4 or newer).
 
 Nothing is sent off the machine, there is no login screen, and the server is loopback-only unless you override `PI_WEBAPP_HOST`.
 
-### From a local checkout
-
-```bash
-# install into your pi config (adds it to ~/.pi/agent/settings.json)
-pi install ./path/to/pi-webapp
-```
-
-### Try it without installing
-
-```bash
-pi -e ./path/to/pi-webapp
-```
-
-Loads the extension for that run only. The dashboard still starts, but npm never runs, so any autostart comes from the extension's own `session_start` step.
-
-### Optional: a `pi-webapp` command on your PATH
-
-```bash
-npm install -g /path/to/pi-webapp   # or a tarball from `npm pack`
-pi-webapp serve
-```
-
-This is only needed for the standalone daemon without `pi`. The npm name `pi-webapp` belongs to an unrelated package, so there is no `npx pi-webapp` and no registry install.
-
 ### After installing
 
 ```bash
@@ -105,14 +81,13 @@ You do not need a PATH entry or a global install to use it:
 /webapp daemon stop           # stops the one pi-webapp started
 ```
 
-Or run the CLI directly from a checkout / from the `pi install`ed copy:
+Or run the CLI from the copy you already installed:
 
 ```bash
-node bin/pi-webapp.mjs serve                      # checkout
-node ~/.pi/agent/git/github.com/luxuride-pi-extensions/pi-webapp/bin/pi-webapp.mjs serve   # after `pi install git:...`
+node ~/.pi/agent/git/github.com/luxuride-pi-extensions/pi-webapp/bin/pi-webapp.mjs serve
 ```
 
-If you want a `pi-webapp` command on your PATH, install the package globally from a checkout or a `npm pack` tarball (`npm install -g /path/to/pi-webapp`). The name `pi-webapp` on npm belongs to an unrelated package, so there is no `npx pi-webapp`.
+There is no registry package to `npx` — the name `pi-webapp` on npm belongs to an unrelated project — and you do not need a global install, because the installed copy is complete.
 
 `serve` is optional: `pi-webapp` and `pi-webapp serve` are the same command. The daemon prints its URL and then serves until it is asked to stop:
 
@@ -146,7 +121,7 @@ Installing the package enables an always-on dashboard; there is no extra command
 
 - **`npm install`** (lifecycle scripts allowed) → `scripts/postinstall.mjs` writes the unit, enables it and starts it.
 - **`pi install …`** (npm 12 blocks install scripts by default, and `pi install` uses `--omit=dev`) → the extension performs the same convergence on the first `session_start`, so the first `pi` you run after installing reports the autostart and the unit appears.
-- **`/webapp daemon install`** → same thing on demand, e.g. after moving the checkout or changing the port.
+- **`/webapp daemon install`** → same thing on demand, e.g. after changing the port or reinstalling.
 
 From then on the service starts at login, restarts on failure, keeps the dashboard alive after `pi` exits, and every `pi` process (including subagents) joins it as a client instead of binding the port. If something already owns the port, the service runs `serve --wait` and takes the dashboard over as soon as the port frees up — no restart loop, no lost events.
 
@@ -181,7 +156,7 @@ Environment=PATH=/usr/local/bin:/usr/bin:/bin
 Environment=PI_WEBAPP_HOST=127.0.0.1
 Environment=PI_WEBAPP_PORT=8787
 Environment=PI_WEBAPP_PI_BIN=/home/you/.pi/agent/bin/pi
-ExecStart=/usr/bin/node /path/to/pi-webapp/bin/pi-webapp.mjs serve --wait --host 127.0.0.1 --port 8787
+ExecStart=/usr/bin/node /home/you/.pi/agent/git/github.com/luxuride-pi-extensions/pi-webapp/bin/pi-webapp.mjs serve --wait --host 127.0.0.1 --port 8787
 Restart=on-failure
 RestartSec=3
 
@@ -194,7 +169,8 @@ WantedBy=default.target
 ### tmux
 
 ```bash
-tmux new-session -d -s pi-webapp 'node /path/to/pi-webapp/bin/pi-webapp.mjs serve --cwd ~/projects'
+tmux new-session -d -s pi-webapp \
+  'node ~/.pi/agent/git/github.com/luxuride-pi-extensions/pi-webapp/bin/pi-webapp.mjs serve --cwd ~/projects'
 tmux attach -t pi-webapp        # Ctrl-b d to detach again
 ```
 
