@@ -1,0 +1,126 @@
+@import "tailwindcss";
+
+@plugin "daisyui" {
+	themes: false;
+	logs: false;
+}
+
+@plugin "daisyui/theme" {
+	name: "piwabapp";
+	default: true;
+	prefersdark: true;
+	color-scheme: dark;
+	--color-base-100: oklch(17% 0.015 265);
+	--color-base-200: oklch(21% 0.018 265);
+	--color-base-300: oklch(26% 0.02 265);
+	--color-base-content: oklch(92% 0.01 260);
+	--color-primary: oklch(72% 0.16 250);
+	--color-primary-content: oklch(99% 0.01 250);
+	--color-secondary: oklch(68% 0.15 300);
+	--color-accent: oklch(75% 0.15 160);
+	--color-neutral: oklch(24% 0.02 265);
+	--color-info: oklch(72% 0.12 230);
+	--color-success: oklch(74% 0.15 155);
+	--color-warning: oklch(82% 0.15 85);
+	--color-error: oklch(68% 0.19 20);
+	--radius-selector: 0.5rem;
+	--radius-field: 0.5rem;
+	--radius-box: 0.75rem;
+	--size-selector: 0.25rem;
+	--size-field: 0.25rem;
+	--border: 1px;
+}
+
+/* The dashboard owns the viewport; only its panels scroll. */
+html,
+body,
+#app {
+	height: 100%;
+}
+body {
+	overflow: hidden;
+}
+
+/* Thin, low-contrast scrollbars keep dense panels readable. */
+* {
+	scrollbar-width: thin;
+	scrollbar-color: var(--color-base-300) transparent;
+}
+*::-webkit-scrollbar {
+	width: 8px;
+	height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+	background-color: var(--color-base-300);
+	border-radius: 9999px;
+}
+*::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+/* Long prompts and tool output wrap instead of widening the feed. */
+.wrap-anywhere,
+.feed-scroll {
+	overflow-wrap: anywhere;
+	word-break: break-word;
+}
+pre {
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+
+.feed-scroll {
+	scrollbar-gutter: stable;
+}
+.fade-in {
+	animation: feed-fade-in 180ms ease-out both;
+}
+@keyframes feed-fade-in {
+	from {
+		opacity: 0;
+		transform: translateY(3px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+.thinking {
+	font-style: italic;
+	opacity: 0.55;
+}
+
+/* Session tree: each nested node owns a rail segment, and its row draws the
+   elbow that joins the rail to the row content. */
+.tree-children {
+	position: relative;
+	margin-left: 0.7rem;
+	padding-left: 0.7rem;
+}
+.tree-node {
+	position: relative;
+}
+.tree-children > .tree-node::before {
+	content: "";
+	position: absolute;
+	left: -0.7rem;
+	top: 0;
+	bottom: 0;
+	width: 1px;
+	background: color-mix(in oklch, var(--color-base-content) 16%, transparent);
+}
+.tree-children > .tree-node > .tree-line::after {
+	content: "";
+	position: absolute;
+	left: -0.7rem;
+	top: 1.15rem;
+	width: 0.5rem;
+	height: 1px;
+	background: color-mix(in oklch, var(--color-base-content) 16%, transparent);
+}
+
+/* Leech tooltip lists watched directories. */
+.tooltip::before {
+	white-space: pre-line;
+	max-width: 22rem;
+}
