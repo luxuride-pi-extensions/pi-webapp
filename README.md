@@ -20,33 +20,65 @@ A browser dashboard for [pi](https://github.com/earendil-works/pi) coding-agent 
 
 ## Install
 
-### From git
-
 ```bash
 pi install git:github.com/luxuride-pi-extensions/pi-webapp
 ```
 
+One command, nothing else to build or configure. It registers the extension with `pi`, ships the compiled dashboard, and — on Linux with a systemd user session — **enables the always-on dashboard service**, so the dashboard is already running at your next login and every `pi` process joins it instead of starting a second server.
+
+Requires **Node.js >= 22.19** and a `pi` with extension support (1.4 or newer).
+
+### What installing does
+
+| Step | Effect |
+| --- | --- |
+| Extension registration | `post_work_state` and `capture_playwright_snapshot` become available in every session, including subagents. |
+| Dashboard | The first `pi` process serves `http://127.0.0.1:8787`; any further `pi` process joins it as an instance (primary/secondary election). |
+| Autostart | `~/.config/systemd/user/pi-webapp.service` is written, enabled and started by the npm `postinstall` hook, or by the extension on the first `session_start` when npm skips install scripts (npm 12 blocks them by default and `pi install` uses `--omit=dev`). |
+| Subagent tree | Child `pi` processes that inherit `PI_WEBAPP_PARENT_SESSION_ID` / `PI_WEBAPP_AGENT_NAME` (or a `parentSession` header) are grouped under their parent. |
+
+Nothing is sent off the machine, there is no login screen, and the server is loopback-only unless you override `PI_WEBAPP_HOST`.
+
 ### From a local checkout
 
 ```bash
-# install into your pi config
+# install into your pi config (adds it to ~/.pi/agent/settings.json)
 pi install ./path/to/pi-webapp
+```
 
-# or try it without installing
+### Try it without installing
+
+```bash
 pi -e ./path/to/pi-webapp
 ```
 
-Requires **Node.js >= 22.19**. Published packages ship compiled assets in `dist/`, so you only need a build when working on the source (see [Build from source](#build-from-source)).
+Loads the extension for that run only. The dashboard still starts, but npm never runs, so any autostart comes from the extension's own `session_start` step.
+
+### Optional: a `pi-webapp` command on your PATH
+
+```bash
+npm install -g /path/to/pi-webapp   # or a tarball from `npm pack`
+pi-webapp serve
+```
+
+This is only needed for the standalone daemon without `pi`. The npm name `pi-webapp` belongs to an unrelated package, so there is no `npx pi-webapp` and no registry install.
+
+### After installing
+
+```bash
+pi                                  # start (or continue) a session
+```
+
+Open **http://127.0.0.1:8787** — or run `/webapp daemon status` inside `pi` for the URL, mode and whether the systemd service is enabled. To remove the autostart again: `/webapp daemon uninstall` (or `systemctl --user disable --now pi-webapp`). Details, logs and opt-outs: [Autostart](#autostart-systemd-user-service).
 
 ### Quick start
 
 ```bash
-pi
+pi                                    # any session: the dashboard is already there
+xdg-open http://127.0.0.1:8787         # or just open the URL in a browser
 ```
 
-Start a session or send it a prompt, then open **http://127.0.0.1:8787** in a browser. That is the whole setup: the dashboard lives inside `pi`, so it is there whenever you are working.
-
-Installing the package also **enables an always-on dashboard**: on a Linux machine with a systemd user session the installer registers `pi-webapp.service`, so the dashboard is already running at your next login and every `pi` process joins it instead of starting its own. See [Autostart](#autostart-systemd-user-service) for what that writes, how to uninstall it, and how to opt out.
+Send the agent a prompt and watch it work: prompts, tool calls, reasoning, subagents and posted screenshots appear in the feed as they happen, and the prompt box at the bottom steers the running session.
 
 ### Commands
 
