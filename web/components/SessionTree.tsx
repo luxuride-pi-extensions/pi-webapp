@@ -23,7 +23,7 @@ interface TreeNode {
 	children: TreeNode[];
 }
 
-type StatusFilter = "all" | "running";
+type StatusFilter = "all" | "live";
 
 const AGENT_COLORS = ["#8ab4ff", "#c39bff", "#6fd3a8", "#ffb86b", "#ff8fa3", "#7ad7e6"];
 
@@ -73,7 +73,7 @@ function buildForest(sessions: SessionNode[]): TreeNode[] {
 
 function nodeMatches(node: TreeNode, query: string, filter: StatusFilter): boolean {
 	const { session } = node;
-	if (filter === "running" && session.status !== "running") return false;
+	if (filter === "live" && session.status !== "running") return false;
 	if (!query) return true;
 	const haystack = `${session.agentName ?? ""} ${session.title ?? ""} ${session.cwd ?? ""} ${session.id}`.toLowerCase();
 	return haystack.includes(query);
@@ -169,14 +169,24 @@ function TreeRow({
 				>
 					<span class="size-1.5 shrink-0 rounded-full" style={{ backgroundColor: agentColor(name) }} aria-hidden="true" />
 					<span class={`truncate text-[13px] ${session.isSubagent ? "font-normal" : "font-medium"}`}>{name}</span>
-					{session.status === "running" && (
-						<span class="size-1.5 shrink-0 animate-pulse rounded-full bg-success" aria-label="running" />
-					)}
+					{session.busy === true ? (
+						<span
+							class="size-1.5 shrink-0 animate-pulse rounded-full bg-info"
+							title="A message is running"
+							aria-label="working"
+						/>
+					) : session.status === "running" ? (
+						<span
+							class="size-1.5 shrink-0 rounded-full bg-success/60"
+							title="pi instance running, idle"
+							aria-label="live"
+						/>
+					) : null}
 					{session.status === "completed" && (
-					<span class="shrink-0 text-[10px] text-success/50" aria-label="completed">
-						✓
-					</span>
-				)}
+						<span class="shrink-0 text-[10px] text-success/50" aria-label="completed">
+							✓
+						</span>
+					)}
 					{session.status === "failed" && (
 						<span class="shrink-0 text-[10px] text-error" aria-label="failed">
 							✕
@@ -360,7 +370,7 @@ export function SessionTree({
 					)}
 				</label>
 				<div class="flex items-center gap-0.5 text-[11px]">
-					{(["all", "running"] as const).map((value) => (
+					{(["all", "live"] as const).map((value) => (
 						<button
 							key={value}
 							type="button"

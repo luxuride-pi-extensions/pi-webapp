@@ -15,7 +15,7 @@ import { NewSessionModal } from "./components/NewSessionModal";
 import { PromptBar } from "./components/PromptBar";
 import { SessionTree } from "./components/SessionTree";
 import { SubagentRail } from "./components/SubagentRail";
-import { StatusBadge } from "./components/StatusBadge";
+import { ActivityBadge, StatusBadge } from "./components/StatusBadge";
 import { useWebSocket } from "./hooks/useWebSocket";
 import { sessionDescription, sessionName } from "./format";
 import { navigate, useRoute } from "./router";
@@ -222,22 +222,19 @@ function SessionHeader({
 	modelBusy = false,
 }: SessionHeaderProps) {
 	const name = sessionName(session);
-	const canTakeOver = session.source === "leech" && !session.isSubagent && !!onTakeOver;
+	const canTakeOver =
+		session.source === "leech" && !session.isSubagent && session.ownerPid !== undefined && !!onTakeOver;
 	const busy = takeoverBusy || !!session.takeoverSpawnId;
 	const subtitle = session.title && session.title !== name ? session.title : null;
 	const currentModel = session.model ?? "";
 	return (
 		<div class="border-b border-base-300 bg-base-100 px-4 py-2 shadow-[0_6px_12px_-12px_rgba(0,0,0,0.9)]">
 			<div class="flex min-w-0 items-center gap-2">
-				<StatusBadge status={session.status} size="xs" />
+				<StatusBadge status={session.status} source={session.source} size="xs" />
+				<ActivityBadge session={session} />
 				<h1 class="min-w-0 truncate text-sm font-semibold" title={session.id}>
 					{name}
 				</h1>
-				{session.source === "leech" && (
-					<span class="badge badge-ghost badge-xs font-mono" title="Leeched from a transcript — take it over to prompt it">
-						leech
-					</span>
-				)}
 				{subtitle && <span class="hidden min-w-0 truncate text-xs opacity-65 lg:inline">— {subtitle}</span>}
 				<div class="ml-auto flex shrink-0 items-center gap-1">
 					{canTakeOver && (

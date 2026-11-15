@@ -864,6 +864,9 @@ export class WebappServer {
                     node.ownerBusy = true;
                 else
                     delete node.ownerBusy;
+                // A leeched transcript has no attached instance of its own; whether it
+                // is "working" is a property of the pi process that owns it.
+                node.busy = info.busy;
             }
             else {
                 delete node.ownerPid;
@@ -1015,6 +1018,7 @@ export class WebappServer {
                 node.source = source;
                 node.isSubagent = Boolean(parentSessionId) || event.isSubagent === true || node.isSubagent;
                 node.status = "running";
+                node.busy = false;
                 delete node.endedAt;
                 node.updatedAt = Math.max(node.updatedAt, timestamp);
                 touched.add(sessionId);
@@ -1049,6 +1053,7 @@ export class WebappServer {
             case "session_ended": {
                 const node = this.ensureSession(sessionId, source, timestamp);
                 node.status = str(data.status) === "failed" ? "failed" : "completed";
+                node.busy = false;
                 node.endedAt = timestamp;
                 node.updatedAt = Math.max(node.updatedAt, timestamp);
                 touched.add(sessionId);
@@ -1108,6 +1113,7 @@ export class WebappServer {
             case "agent_start": {
                 const node = this.ensureSession(sessionId, source, timestamp);
                 node.status = "running";
+                node.busy = true;
                 delete node.endedAt;
                 node.updatedAt = Math.max(node.updatedAt, timestamp);
                 touched.add(sessionId);
@@ -1116,6 +1122,7 @@ export class WebappServer {
             case "agent_end": {
                 const node = this.ensureSession(sessionId, source, timestamp);
                 node.status = "completed";
+                node.busy = false;
                 node.updatedAt = Math.max(node.updatedAt, timestamp);
                 touched.add(sessionId);
                 break;
@@ -1133,6 +1140,11 @@ export class WebappServer {
                 if (!terminalLive) {
                     node.status = "running";
                     delete node.endedAt;
+                }
+                // Only a prompt, tool call or assistant message means the agent is
+                // actually working; `work_state` can arrive after the turn ended.
+                if (event.type === "user_prompt" || event.type === "tool_start" || event.type === "assistant_message") {
+                    node.busy = !terminalLive ? true : node.busy === true;
                 }
                 node.updatedAt = Math.max(node.updatedAt, timestamp);
                 touched.add(sessionId);

@@ -111,6 +111,12 @@ export interface SessionNode {
 	model?: string;
 	status: SessionStatus;
 	source: SessionSource;
+	/**
+	 * True while a turn is executing. This is the *message* being busy, which is
+	 * independent of `source`: a live session is attached to a running pi process
+	 * whether or not it is currently working on a turn.
+	 */
+	busy?: boolean;
 	isSubagent: boolean;
 	startedAt: number;
 	updatedAt: number;

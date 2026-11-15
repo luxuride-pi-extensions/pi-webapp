@@ -124,7 +124,8 @@ export function SubagentRail({ session, sessions, events, onSelect }: SubagentRa
 				{items.map(({ session: child, last, count }) => {
 					const name = sessionName(child);
 					const preview = last ? eventPreview(last) : "";
-					const running = child.status === "running";
+					const working = child.busy === true;
+					const live = child.status === "running";
 					return (
 						<li key={child.id}>
 							<button
@@ -135,9 +136,11 @@ export function SubagentRail({ session, sessions, events, onSelect }: SubagentRa
 								data-testid="subagent-rail-item"
 							>
 								<div class="flex items-center gap-1.5">
-									{running && (
-										<span class="size-1.5 animate-pulse rounded-full bg-success" aria-hidden="true" />
-									)}
+									{working ? (
+										<span class="size-1.5 animate-pulse rounded-full bg-info" title="Working on a message" aria-hidden="true" />
+									) : live ? (
+										<span class="size-1.5 rounded-full bg-success/60" title="Running, idle" aria-hidden="true" />
+									) : null}
 									<span class="truncate text-sm font-medium">{name}</span>
 									<StatusBadge status={child.status} />
 									<span class="ml-auto font-mono text-[10px] opacity-65">
