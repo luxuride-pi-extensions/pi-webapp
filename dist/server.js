@@ -623,7 +623,10 @@ export class WebappServer {
         const pids = probeResult?.pids ?? [];
         const pending = probeResult?.pending ?? false;
         const recent = Number.isFinite(node.updatedAt) && Date.now() - node.updatedAt <= OWNER_BUSY_WINDOW_MS;
-        return { pids, pending, busy: pending || (pids.length > 0 && recent) };
+        // "Working" requires a live owner process: a transcript whose last entry is a
+        // user message is not busy once the process that wrote it is gone.
+        const busy = pids.length > 0 && (pending || recent);
+        return { pids, pending, busy };
     }
     /**
      * Removes a session (and its subagents) from the dashboard. Running pi
@@ -854,6 +857,9 @@ export class WebappServer {
                 node.status = "completed";
                 node.endedAt = node.endedAt ?? node.updatedAt;
             }
+            if (node.source === "live") {
+                node.busy = node.busy === true;
+            }
             if (node.source === "leech") {
                 const info = this.ownerInfo(node);
                 if (info.pids.length > 0)
@@ -865,8 +871,13 @@ export class WebappServer {
                 else
                     delete node.ownerBusy;
                 // A leeched transcript has no attached instance of its own; whether it
-                // is "working" is a property of the pi process that owns it.
+                // is "working" is a property of the pi process that owns it, and it only
+                // counts as live while such a process is actually running it.
                 node.busy = info.busy;
+                if (info.pids.length === 0 && node.status === "running") {
+                    node.status = "completed";
+                    node.endedAt = node.endedAt ?? node.updatedAt;
+                }
             }
             else {
                 delete node.ownerPid;
@@ -1121,7 +1132,10 @@ export class WebappServer {
             }
             case "agent_end": {
                 const node = this.ensureSession(sessionId, source, timestamp);
-                node.status = "completed";
+                // The turn is over, but a live session is still attached to its pi
+                // instance: only the message stopped running, not the instance.
+                if (node.source !== "live")
+                    node.status = "completed";
                 node.busy = false;
                 node.updatedAt = Math.max(node.updatedAt, timestamp);
                 touched.add(sessionId);
