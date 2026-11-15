@@ -34,7 +34,7 @@ Requires **Node.js >= 22.19** and a `pi` with extension support (1.4 or newer).
 | --- | --- |
 | Extension registration | `post_work_state` and `capture_playwright_snapshot` become available in every session, including subagents. |
 | Dashboard | The first `pi` process serves `http://127.0.0.1:8787`; any further `pi` process joins it as an instance (primary/secondary election). |
-| Autostart | `~/.config/systemd/user/pi-webapp.service` is written, enabled and started by the npm `postinstall` hook, or by the extension on the first `session_start` when npm skips install scripts (npm 12 blocks them by default and `pi install` uses `--omit=dev`). |
+| Autostart | `~/.config/systemd/user/pi-webapp.service` is written, enabled and started during the install by the package's own `postinstall` hook. If lifecycle scripts are suppressed (`--ignore-scripts`, CI images, a registry policy) or the unit was removed, the extension does the same on the next `session_start`. |
 | Subagent tree | Child `pi` processes that inherit `PI_WEBAPP_PARENT_SESSION_ID` / `PI_WEBAPP_AGENT_NAME` (or a `parentSession` header) are grouped under their parent. |
 
 Nothing is sent off the machine, there is no login screen, and the server is loopback-only unless you override `PI_WEBAPP_HOST`.
@@ -119,8 +119,8 @@ The daemon reads the same environment as extension mode (`PI_WEBAPP_PORT`, `PI_W
 
 Installing the package enables an always-on dashboard; there is no extra command to run.
 
-- **`npm install`** (lifecycle scripts allowed) → `scripts/postinstall.mjs` writes the unit, enables it and starts it.
-- **`pi install …`** (npm 12 blocks install scripts by default, and `pi install` uses `--omit=dev`) → the extension performs the same convergence on the first `session_start`, so the first `pi` you run after installing reports the autostart and the unit appears.
+- **`pi install …` / `npm install`** → `scripts/postinstall.mjs` runs during the install, writes the unit, enables it, starts it, and prints `dashboard autostart enabled (…)` plus the URL.
+- **Lifecycle scripts suppressed** (`--ignore-scripts`, CI images, a registry policy) → the extension performs the same convergence on the first `session_start`, so the first `pi` you run after installing reports the autostart and the unit appears.
 - **`/webapp daemon install`** → same thing on demand, e.g. after changing the port or reinstalling.
 
 From then on the service starts at login, restarts on failure, keeps the dashboard alive after `pi` exits, and every `pi` process (including subagents) joins it as a client instead of binding the port. If something already owns the port, the service runs `serve --wait` and takes the dashboard over as soon as the port frees up — no restart loop, no lost events.
@@ -553,9 +553,9 @@ node tests/daemon.mjs # standalone daemon test (requires a build)
 node tests/autostart.mjs  # systemd autostart test (skips without a user session)
 ```
 
-`dist/` is committed so that `pi install git:...` (which installs with
-`--omit=dev` and may skip lifecycle scripts) always ships a working dashboard
-bundle. `npm run build` regenerates it; the `prepare` hook reuses an existing
+`dist/` is committed so that `pi install git:...` always ships a working
+dashboard bundle, even where the build toolchain is unavailable (`--omit=dev`)
+or lifecycle scripts are suppressed. `npm run build` regenerates it; the `prepare` hook reuses an existing
 `dist/` unless it is incomplete or you set `PI_WEBAPP_FORCE_BUILD=1`. Re-run
 `npm run build` after changing `src/` or `web/`, and commit `dist/` with the
 change.

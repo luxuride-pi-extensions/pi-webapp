@@ -3,10 +3,12 @@
  * npm lifecycle hook: enable the pi-webapp dashboard as a **systemd user service**
  * so it starts at login and keeps running after every pi session ends.
  *
- * This path only runs when npm is allowed to execute lifecycle scripts. `pi
- * install` installs with `--omit=dev` and npm 12 blocks install scripts by
- * default, so the extension repeats the same convergence on `session_start`
- * (see src/systemd.ts). Both paths are idempotent and share one code path.
+ * `pi install` and `npm install` do run this hook (npm 12's install-scripts
+ * gate blocks *dependency* scripts, not this package's own). When lifecycle
+ * scripts are suppressed entirely (`--ignore-scripts`, CI images, a registry
+ * policy) nothing runs here, so the extension repeats the same convergence on
+ * `session_start` (see src/systemd.ts). Both paths are idempotent and share
+ * one code path.
  *
  * The hook never fails an install: a missing systemd session, a container, or a
  * read-only config directory just prints a note and exits 0.

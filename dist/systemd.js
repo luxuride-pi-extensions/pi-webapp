@@ -6,11 +6,11 @@
  * pi sessions simply join it instead of each trying to bind the port.
  *
  * Two entry points drive this:
- *  - `scripts/postinstall.mjs` (runs when npm is allowed to execute lifecycle
- *    scripts) calls {@link installSystemdService} once after installation.
+ *  - `scripts/postinstall.mjs` runs during `pi install` / `npm install` and
+ *    calls {@link installSystemdService} once after installation.
  *  - the extension calls {@link ensureAutostartService} on `session_start`, so
- *    installations that skipped lifecycle scripts (npm 12 blocks them by
- *    default, and `pi install` uses `--omit=dev`) converge to the same state.
+ *    installations whose lifecycle scripts were suppressed (`--ignore-scripts`,
+ *    CI images, registry policy) converge to the same state.
  *
  * Everything here is best-effort and idempotent: a missing systemd session, a
  * read-only config dir, or a port that is still held by another process must

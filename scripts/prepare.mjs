@@ -3,9 +3,10 @@
  * `prepare` hook. Runs on `npm install` and on git installs (`pi install git:...`).
  *
  * Git installs use `--omit=dev`, so the build toolchain (typescript, esbuild,
- * tailwindcss) is not available there. The repository therefore ships a
- * prebuilt `dist/`, and this script only rebuilds when that output is missing
- * or when an explicit rebuild is requested:
+ * tailwindcss) may not be available there, and lifecycle scripts can be
+ * suppressed entirely. The repository therefore ships a prebuilt `dist/`, and
+ * this script only rebuilds when that output is missing or when an explicit
+ * rebuild is requested:
  *
  *   PI_WEBAPP_FORCE_BUILD=1 npm install
  */
