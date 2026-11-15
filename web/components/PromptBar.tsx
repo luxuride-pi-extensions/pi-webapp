@@ -67,7 +67,7 @@ export function PromptBar({ target, onSend, disabled = false, onTakeOver, taking
 		const busy = target.ownerBusy === true;
 		return (
 			<div class="flex items-center gap-3 border-t border-base-300 bg-base-100 px-3 py-2 text-meta">
-				<span class="min-w-0 truncate opacity-70">
+				<span class="min-w-0 truncate opacity-85">
 					{busy
 						? `Busy in pi pid ${pid} — wait for the current turn to finish.`
 						: `Still open in pi pid ${pid} — take it over to prompt it from here.`}
@@ -90,7 +90,7 @@ export function PromptBar({ target, onSend, disabled = false, onTakeOver, taking
 
 	return (
 		<div class="border-t border-base-300 bg-base-100 px-3 py-2">
-			{hint && <div class="mb-1.5 text-meta opacity-60">{hint}</div>}
+			{hint && <div class="mb-1.5 text-meta opacity-80">{hint}</div>}
 			{error && (
 				<div class="alert alert-error mb-2 py-1.5 text-meta" role="alert">
 					<span class="flex-1">{error}</span>
@@ -104,9 +104,9 @@ export function PromptBar({ target, onSend, disabled = false, onTakeOver, taking
 					sent
 				</div>
 			)}
-			<div class="rounded-box border border-base-300 bg-base-100 transition-colors focus-within:border-primary/60">
+			<div class="rounded-box border border-base-300 bg-base-100 focus-within:border-primary/60">
 				<textarea
-					class="block w-full resize-none bg-transparent px-3 py-2 font-mono text-body leading-relaxed outline-none placeholder:opacity-45"
+					class="block w-full resize-none bg-transparent px-3 py-2 font-mono text-body leading-relaxed outline-none placeholder:opacity-85"
 					rows={2}
 					value={text}
 					placeholder={`Message ${name}…`}
@@ -136,7 +136,7 @@ export function PromptBar({ target, onSend, disabled = false, onTakeOver, taking
 							</option>
 						))}
 					</select>
-					<span class="hidden text-micro opacity-45 sm:inline">⏎ send · ⇧⏎ newline</span>
+					<span class="hidden text-micro opacity-85 sm:inline">⏎ send · ⇧⏎ newline</span>
 					<button
 						type="button"
 						class="btn btn-primary btn-sm ml-auto gap-1.5 whitespace-nowrap px-3"

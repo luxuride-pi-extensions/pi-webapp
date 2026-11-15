@@ -3,14 +3,14 @@
 /* Typographic scale. Everything in the UI uses one of these instead of ad-hoc
    pixel values, so the dashboard stays legible and consistent. */
 @theme {
-	--text-micro: 0.8125rem;
-	--text-micro--line-height: 1.5;
-	--text-meta: 0.875rem;
-	--text-meta--line-height: 1.55;
-	--text-body: 1rem;
-	--text-body--line-height: 1.75;
-	--text-lead: 1.125rem;
-	--text-lead--line-height: 1.45;
+	--text-micro: 0.9375rem;
+	--text-micro--line-height: 1.55;
+	--text-meta: 0.9375rem;
+	--text-meta--line-height: 1.6;
+	--text-body: 1.125rem;
+	--text-body--line-height: 1.8;
+	--text-lead: 1.25rem;
+	--text-lead--line-height: 1.5;
 }
 
 @plugin "daisyui" {
@@ -23,10 +23,10 @@
 	default: true;
 	prefersdark: true;
 	color-scheme: dark;
-	--color-base-100: oklch(17% 0.015 265);
-	--color-base-200: oklch(21% 0.018 265);
-	--color-base-300: oklch(26% 0.02 265);
-	--color-base-content: oklch(92% 0.01 260);
+	--color-base-100: oklch(16% 0.014 265);
+	--color-base-200: oklch(21% 0.016 265);
+	--color-base-300: oklch(29% 0.018 265);
+	--color-base-content: oklch(96% 0.008 260);
 	--color-primary: oklch(72% 0.16 250);
 	--color-primary-content: oklch(99% 0.01 250);
 	--color-secondary: oklch(68% 0.15 300);
@@ -54,8 +54,8 @@ body {
 	overflow: hidden;
 	font-family:
 		ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-	font-size: 1rem;
-	line-height: 1.65;
+	font-size: 1.125rem;
+	line-height: 1.7;
 	letter-spacing: 0.002em;
 }
 
@@ -97,19 +97,6 @@ pre {
 
 .feed-scroll {
 	scrollbar-gutter: stable;
-}
-.fade-in {
-	animation: feed-fade-in 180ms ease-out both;
-}
-@keyframes feed-fade-in {
-	from {
-		opacity: 0;
-		transform: translateY(3px);
-	}
-	to {
-		opacity: 1;
-		transform: translateY(0);
-	}
 }
 .thinking {
 	font-style: italic;
@@ -161,7 +148,7 @@ pre {
 }
 .hljs-comment,
 .hljs-quote {
-	color: color-mix(in oklch, var(--color-base-content) 62%, transparent);
+	color: color-mix(in oklch, var(--color-base-content) 74%, transparent);
 	font-style: italic;
 }
 .hljs-keyword,

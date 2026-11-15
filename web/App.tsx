@@ -101,13 +101,13 @@ function TopBar({
 		<header class="flex items-center gap-3 border-b border-base-300 bg-base-200/80 px-3 py-1.5">
 			<span class="text-body font-semibold tracking-tight">pi-webapp</span>
 			<span
-				class="flex items-center gap-1.5 text-meta opacity-60"
+				class="flex items-center gap-1.5 text-meta opacity-80"
 				title={live ? "WebSocket connected" : "Reconnecting to the dashboard server"}
 			>
-				<span class={`size-1.5 rounded-full ${live ? "bg-success" : "bg-warning animate-pulse"}`} aria-hidden="true" />
+				<span class={`size-1.5 rounded-full ${live ? "bg-success" : "bg-warning"}`} aria-hidden="true" />
 				{live ? "live" : status === "connecting" ? "connecting" : "reconnecting"}
 			</span>
-			<span class="hidden items-center gap-1.5 font-mono text-meta opacity-65 md:flex" aria-label="Dashboard totals">
+			<span class="hidden items-center gap-1.5 font-mono text-meta opacity-82 md:flex" aria-label="Dashboard totals">
 				<span>{sessions} sessions</span>
 				<span aria-hidden="true">·</span>
 				<span>{subagents} subagents</span>
@@ -226,7 +226,7 @@ function SessionHeader({
 				<h1 class="min-w-0 truncate text-body font-semibold" title={session.id}>
 					{name}
 				</h1>
-				{subtitle && <span class="hidden min-w-0 truncate text-meta opacity-65 lg:inline">— {subtitle}</span>}
+				{subtitle && <span class="hidden min-w-0 truncate text-meta opacity-82 lg:inline">— {subtitle}</span>}
 				<div class="ml-auto flex shrink-0 items-center gap-1">
 					{canTakeOver && (
 						<button
@@ -295,7 +295,7 @@ function SessionHeader({
 					)}
 				</div>
 			</div>
-			<div class="mt-1 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 font-mono text-meta opacity-65">
+			<div class="mt-1 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 font-mono text-meta opacity-82">
 				<span class="min-w-0 max-w-[24rem] truncate" title={session.cwd ?? ""}>
 					{session.cwd ?? "—"}
 				</span>
@@ -377,7 +377,7 @@ function StartingSpawnList({ spawns, onCancel }: StartingSpawnListProps) {
 	if (!active) return null;
 	return (
 		<section class="border-t border-base-300 p-2" aria-label="Starting sessions">
-			<div class="flex items-center gap-1.5 px-1 pb-1 text-micro tracking-wide uppercase opacity-70">
+			<div class="flex items-center gap-1.5 px-1 pb-1 text-micro tracking-wide uppercase opacity-85">
 				<span class="loading loading-spinner loading-xs" aria-hidden="true" />
 				starting…
 			</div>
@@ -388,7 +388,7 @@ function StartingSpawnList({ spawns, onCancel }: StartingSpawnListProps) {
 							<div class="truncate font-mono text-meta" title={spawn.cwd}>
 								{cwdBasename(spawn.cwd)}
 							</div>
-							<div class="flex items-center gap-1.5 font-mono text-micro opacity-70">
+							<div class="flex items-center gap-1.5 font-mono text-micro opacity-85">
 								{typeof spawn.pid === "number" && <span>pid {spawn.pid}</span>}
 								<span class="ml-auto">{elapsedTime(spawn.startedAt, now)}</span>
 							</div>
@@ -680,6 +680,7 @@ export function App() {
 						spawns={spawns}
 						onStopSpawn={handleStopSpawn}
 						expandAll={expandAll}
+						onExpandAllChange={setExpandAll}
 						onTakeOver={handleTakeOver}
 						takeoverBusyId={takeoverBusyId}
 						onRemove={requestRemove}
@@ -718,16 +719,16 @@ export function App() {
 							{selected.isSubagent && (
 							<nav
 								aria-label="Breadcrumb"
-								class="flex items-center gap-1 overflow-x-auto border-b border-base-300 bg-base-200/40 px-4 py-1 text-meta opacity-60"
+								class="flex items-center gap-1 overflow-x-auto border-b border-base-300 bg-base-200/40 px-4 py-1 text-meta opacity-80"
 								data-testid="breadcrumb"
 							>
-								<span class="shrink-0 opacity-70" aria-hidden="true">↳</span>
+								<span class="shrink-0 opacity-85" aria-hidden="true">↳</span>
 								{trail.map((node, index) => {
 									const last = index === trail.length - 1;
 									const label = sessionName(node);
 									return (
 										<span key={node.id} class="flex shrink-0 items-center gap-1.5">
-											{index > 0 && <span class="opacity-70">/</span>}
+											{index > 0 && <span class="opacity-85">/</span>}
 											{last ? (
 												<span class="font-medium opacity-100" aria-current="page">
 													{label}
@@ -793,7 +794,7 @@ export function App() {
 						<h3 id="rename-title" class="text-base font-semibold">
 							Rename session
 						</h3>
-						<p class="py-2 text-meta opacity-70">
+						<p class="py-2 text-meta opacity-85">
 							Only the dashboard label changes. The agent name and the transcript stay untouched — clear the field to
 							reset.
 						</p>
@@ -842,7 +843,7 @@ export function App() {
 							{sessionDescription(takeoverTarget)} is still open in pi pid {takeoverTarget.ownerPid}. Stopping that pi
 							process and resuming the session in a new one lets you prompt it from the dashboard.
 						</p>
-						<p class="rounded-md bg-base-200 px-2 py-1 font-mono text-meta opacity-60">
+						<p class="rounded-md bg-base-200 px-2 py-1 font-mono text-meta opacity-80">
 							pi --session {takeoverTarget.sessionFile ?? takeoverTarget.id}
 						</p>
 						<div class="modal-action">
@@ -888,7 +889,7 @@ export function App() {
 							/>
 							<span class="text-meta">
 								Also delete the transcript file
-								<span class="ml-1 font-mono opacity-60">
+								<span class="ml-1 font-mono opacity-80">
 									{removeTarget.sessionFile ? basename(removeTarget.sessionFile) : "—"}
 								</span>
 							</span>

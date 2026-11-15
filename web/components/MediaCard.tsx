@@ -60,10 +60,10 @@ export function MediaCard({ asset, onOpenImage }: MediaCardProps) {
 				</button>
 			)}
 			<figcaption class="flex items-center gap-2 px-2 py-1 text-meta">
-				<span class="truncate font-mono opacity-70" title={asset.filename}>
+				<span class="truncate font-mono opacity-85" title={asset.filename}>
 					{asset.filename}
 				</span>
-				<span class="ml-auto shrink-0 opacity-70">{formatBytes(asset.bytes)}</span>
+				<span class="ml-auto shrink-0 opacity-85">{formatBytes(asset.bytes)}</span>
 				{isVideo && (
 					<a class="link link-primary shrink-0" href={asset.url} download={asset.filename} rel="noreferrer">
 						download

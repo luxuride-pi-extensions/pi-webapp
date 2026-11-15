@@ -11,6 +11,8 @@ export interface SessionTreeProps {
 	onStopSpawn?: (spawnId: string) => void;
 	/** Sticky "expand everything" mode requested from the toolbar. */
 	expandAll?: boolean;
+	/** Lets the tree release the global expand-all toggle when a node is collapsed by hand. */
+	onExpandAllChange?: (value: boolean) => void;
 	/** Offered for sessions that are not managed by this dashboard. */
 	onTakeOver?: (session: SessionNode) => void;
 	takeoverBusyId?: string | null;
@@ -140,7 +142,7 @@ function TreeRow({
 	return (
 		<div class="tree-node" data-testid="session-row" data-session-id={session.id}>
 			<div
-				class={`tree-line group flex items-center gap-0.5 rounded-md pr-1 transition-colors ${
+				class={`tree-line group flex items-center gap-0.5 rounded-md pr-1 ${
 					selected ? "bg-primary/15" : "hover:bg-base-300/60"
 				}`}
 				onContextMenu={(event) => {
@@ -153,7 +155,7 @@ function TreeRow({
 			>
 				<button
 					type="button"
-					class="flex size-5 shrink-0 items-center justify-center rounded text-micro opacity-65 transition hover:bg-base-300 hover:opacity-100 disabled:opacity-0"
+					class="flex size-5 shrink-0 items-center justify-center rounded text-micro opacity-82 hover:bg-base-300 hover:opacity-100 disabled:opacity-0"
 					onClick={() => onToggle(session.id)}
 					aria-label={expanded ? `Collapse ${name}` : `Expand ${name}`}
 					aria-expanded={expanded}
@@ -161,7 +163,7 @@ function TreeRow({
 					data-testid="session-toggle"
 				>
 					{hasChildren ? (
-						<span class={`inline-block transition-transform ${expanded ? "rotate-90" : ""}`}>▸</span>
+						<span class={`inline-block ${expanded ? "rotate-90" : ""}`}>▸</span>
 					) : null}
 				</button>
 				<button
@@ -174,7 +176,7 @@ function TreeRow({
 					<span class={`truncate text-body ${session.isSubagent ? "font-normal" : "font-medium"}`}>{name}</span>
 					{session.busy === true ? (
 						<span
-							class="size-1.5 shrink-0 animate-pulse rounded-full bg-info"
+							class="size-1.5 shrink-0 rounded-full bg-info"
 							title="A message is running"
 							aria-label="working"
 						/>
@@ -196,7 +198,7 @@ function TreeRow({
 						</span>
 					)}
 					{hasChildren && !expanded && (
-						<span class="shrink-0 font-mono text-micro opacity-65" title={`${children.length} subagent(s)`}>
+						<span class="shrink-0 font-mono text-micro opacity-82" title={`${children.length} subagent(s)`}>
 							+{children.length}
 						</span>
 					)}
@@ -205,14 +207,14 @@ function TreeRow({
 						{spawnActive && (
 							<span class="size-1 rounded-full bg-info" title="Started from the dashboard" aria-hidden="true" />
 						)}
-						<time class="w-14 shrink-0 text-right font-mono text-micro tabular-nums opacity-0 transition-opacity group-hover:opacity-60 group-focus-within:opacity-60">
+						<time class="w-14 shrink-0 text-right font-mono text-micro tabular-nums opacity-0 group-hover:opacity-80 group-focus-within:opacity-80">
 							{relativeTime(session.updatedAt || session.startedAt)}
 						</time>
 					</span>
 				</button>
 				<button
 					type="button"
-					class="hidden shrink-0 rounded px-1 text-micro opacity-70 hover:bg-base-300 hover:opacity-100 group-hover:block focus-visible:block"
+					class="hidden shrink-0 rounded px-1 text-micro opacity-85 hover:bg-base-300 hover:opacity-100 group-hover:block focus-visible:block"
 					aria-label={`Actions for ${name}`}
 					title="Session actions"
 					data-testid="row-menu"
@@ -256,6 +258,7 @@ export function SessionTree({
 	spawns = [],
 	onStopSpawn,
 	expandAll = false,
+	onExpandAllChange,
 	onTakeOver,
 	takeoverBusyId = null,
 	onRemove,
@@ -292,9 +295,24 @@ export function SessionTree({
 	);
 	const onToggle = useCallback(
 		(id: string) => {
-			setOverrides((previous) => ({ ...previous, [id]: !expandedIds.has(id) }));
+			const willExpand = !expandedIds.has(id);
+			setOverrides((previous) => {
+				const next = { ...previous };
+				if (expandAll) {
+					// Turning one node by hand must not collapse everything else, so the
+					// current expanded set becomes explicit before the global flag drops.
+					const walk = (node: TreeNode) => {
+						next[node.session.id] = expandedIds.has(node.session.id);
+						node.children.forEach(walk);
+					};
+					forest.forEach(walk);
+					onExpandAllChange?.(false);
+				}
+				next[id] = willExpand;
+				return next;
+			});
 		},
-		[expandedIds],
+		[expandedIds, expandAll, forest, onExpandAllChange],
 	);
 	const [menu, setMenu] = useState<{ sessionId: string; x: number; y: number } | null>(null);
 	const openMenu = useCallback((session: SessionNode, x: number, y: number) => {
@@ -363,12 +381,12 @@ export function SessionTree({
 		<div class="flex min-h-0 flex-col">
 			<div class="flex flex-col gap-1 border-b border-base-300 px-2 py-1.5">
 				<label class="input input-xs flex w-full items-center gap-1 rounded-md border-base-300 bg-base-200">
-					<span class="text-meta opacity-70" aria-hidden="true">
+					<span class="text-meta opacity-85" aria-hidden="true">
 						⌕
 					</span>
 					<input
 						type="search"
-						class="grow bg-transparent text-meta outline-none placeholder:opacity-70"
+						class="grow bg-transparent text-meta outline-none placeholder:opacity-85"
 						placeholder="Filter sessions…"
 						value={query}
 						onInput={(event) => setQuery((event.target as HTMLInputElement).value)}
@@ -378,7 +396,7 @@ export function SessionTree({
 					{query && (
 						<button
 							type="button"
-							class="text-meta opacity-70 hover:opacity-100"
+							class="text-meta opacity-85 hover:opacity-100"
 							onClick={() => setQuery("")}
 							aria-label="Clear filter"
 						>
@@ -391,7 +409,7 @@ export function SessionTree({
 						<button
 							key={value}
 							type="button"
-							class={`btn btn-ghost btn-xs h-6 min-h-0 px-2 font-normal ${statusFilter === value ? "bg-base-300 text-base-content" : "opacity-70"}`}
+							class={`btn btn-ghost btn-xs h-6 min-h-0 px-2 font-normal ${statusFilter === value ? "bg-base-300 text-base-content" : "opacity-85"}`}
 							aria-pressed={statusFilter === value}
 							onClick={() => setStatusFilter(value)}
 							data-testid="status-filter"
@@ -399,12 +417,12 @@ export function SessionTree({
 							{value}
 						</button>
 					))}
-					<span class="ml-auto font-mono text-micro opacity-60">{countNodes(filtered)}</span>
+					<span class="ml-auto font-mono text-micro opacity-80">{countNodes(filtered)}</span>
 				</div>
 			</div>
 			<nav aria-label="Sessions" class="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto p-2" data-testid="session-tree">
 				{filtered.length === 0 ? (
-					<p class="px-2 py-6 text-center text-meta opacity-70">No sessions match this filter.</p>
+					<p class="px-2 py-6 text-center text-meta opacity-85">No sessions match this filter.</p>
 				) : (
 					filtered.map((node) => (
 						<TreeRow

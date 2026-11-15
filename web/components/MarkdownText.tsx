@@ -47,7 +47,7 @@ function renderInlineToken(token: Token, key: string): ComponentChildren {
 			return <em key={key}>{inline((token as Tokens.Em).tokens, { prefix: key })}</em>;
 		case "del":
 			return (
-				<del key={key} class="opacity-60">
+				<del key={key} class="opacity-80">
 					{inline((token as Tokens.Del).tokens, { prefix: key })}
 				</del>
 			);
@@ -94,7 +94,7 @@ function renderInlineToken(token: Token, key: string): ComponentChildren {
 		}
 		case "html":
 			// Raw HTML stays inert: it is shown as text, never parsed.
-			return <span key={key} class="font-mono text-[0.9em] opacity-70">{(token as Tokens.HTML).text}</span>;
+			return <span key={key} class="font-mono text-[0.9em] opacity-85">{(token as Tokens.HTML).text}</span>;
 		default: {
 			const fallback = token as { text?: string; tokens?: Token[] };
 			if (fallback.tokens) return <span key={key}>{inline(fallback.tokens, { prefix: key })}</span>;
@@ -225,7 +225,7 @@ function renderBlockToken(token: Token, key: string): ComponentChildren {
 			return <hr key={key} class="my-3 border-base-300" />;
 		case "html":
 			return (
-				<pre key={key} class="my-1 font-mono text-[0.9em] opacity-70">
+				<pre key={key} class="my-1 font-mono text-[0.9em] opacity-85">
 					{(token as Tokens.HTML).text}
 				</pre>
 			);
@@ -285,7 +285,7 @@ function CodeBlock({ language, code }: CodeBlockProps) {
 					{renderHighlightTokens(tokens, "hl")}
 				</code>
 			</pre>
-			<div class="absolute top-1 right-1 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+			<div class="absolute top-1 right-1 flex items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100">
 				{language && <span class="badge badge-ghost badge-xs uppercase">{language}</span>}
 				<button
 					type="button"

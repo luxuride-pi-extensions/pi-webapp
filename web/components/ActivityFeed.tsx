@@ -220,7 +220,7 @@ function oneLine(text: string, limit = 200): string {
 function HoverClock({ timestamp, class: className = "" }: { timestamp: number; class?: string }) {
 	return (
 		<time
-			class={`pointer-events-none font-mono text-micro tabular-nums opacity-0 transition-opacity group-hover:opacity-65 ${className}`}
+			class={`pointer-events-none font-mono text-micro tabular-nums opacity-0 group-hover:opacity-82 ${className}`}
 			title={new Date(timestamp).toLocaleString()}
 		>
 			{clock(timestamp)}
@@ -237,7 +237,7 @@ function renderAssistant({ event, sessions, selectedId, expandAll }: RenderProps
 	if (text.trim().length === 0 && reasoning.trim().length === 0) return null;
 	return (
 		<div class="group my-1 flex flex-col items-start gap-1">
-			{speaker && <div class="text-micro font-medium uppercase tracking-wide opacity-55">{speaker}</div>}
+			{speaker && <div class="text-micro font-medium uppercase tracking-wide opacity-75">{speaker}</div>}
 			{text.trim().length > 0 && (
 				<div class="max-w-[min(46rem,100%)] text-body leading-[1.7]">
 					<ClampedMarkdown text={text} expandAll={expandAll} />
@@ -245,12 +245,12 @@ function renderAssistant({ event, sessions, selectedId, expandAll }: RenderProps
 			)}
 			{reasoning && (
 				<details class="w-full max-w-[min(46rem,100%)]" open={expandAll} data-testid="thinking">
-					<summary class="flex cursor-pointer list-none items-baseline gap-2 text-micro opacity-55 transition-opacity hover:opacity-80">
-						<span class="shrink-0 w-2 opacity-70" aria-hidden="true">▸</span>
+					<summary class="flex cursor-pointer list-none items-baseline gap-2 text-micro opacity-75 hover:opacity-80">
+						<span class="shrink-0 w-2 opacity-85" aria-hidden="true">▸</span>
 						<span class="shrink-0 uppercase tracking-wide">thinking</span>
 						<span class="line-clamp-1 min-w-0 flex-1 italic">{oneLine(reasoning, 140)}</span>
 					</summary>
-					<div class="thinking mt-1 whitespace-pre-wrap border-l-2 border-base-300 pl-3 text-meta leading-relaxed opacity-70">
+					<div class="thinking mt-1 whitespace-pre-wrap border-l-2 border-base-300 pl-3 text-meta leading-relaxed opacity-85">
 						{reasoning}
 					</div>
 				</details>
@@ -294,14 +294,14 @@ function ToolLine({ item, expandAll }: { item: ToolItem; expandAll: boolean }) {
 					{ok === undefined ? "•" : ok ? "✓" : "✗"}
 				</span>
 				<span class="shrink-0 font-mono text-meta font-medium">{name}</span>
-				<span class="min-w-0 flex-1 truncate font-mono text-meta leading-snug opacity-60" title={request || undefined}>
+				<span class="min-w-0 flex-1 truncate font-mono text-meta leading-snug opacity-80" title={request || undefined}>
 					{request}
 				</span>
-				{duration && <span class="shrink-0 font-mono text-micro tabular-nums opacity-55">{duration}</span>}
+				{duration && <span class="shrink-0 font-mono text-micro tabular-nums opacity-75">{duration}</span>}
 				{usefulOutput && (
 					<button
 						type="button"
-						class="shrink-0 rounded px-1 font-mono text-micro uppercase tracking-wide opacity-0 transition-opacity group-hover:opacity-70 focus-visible:opacity-90"
+						class="shrink-0 rounded px-1 font-mono text-micro uppercase tracking-wide opacity-0 group-hover:opacity-85 focus-visible:opacity-90"
 						onClick={() => setOpen((value) => !value)}
 						aria-expanded={expanded}
 						title="Show the tool output"
@@ -333,7 +333,7 @@ function WorkBlock({ items, expandAll }: { items: ToolItem[]; expandAll: boolean
 		<div class="group/block my-0.5" data-testid="work-block">
 			<button
 				type="button"
-				class="flex w-full items-center gap-2 rounded px-1 py-0.5 text-left text-micro uppercase tracking-wide opacity-50 hover:opacity-90"
+				class="flex w-full items-center gap-2 rounded px-1 py-0.5 text-left text-micro uppercase tracking-wide opacity-85 hover:opacity-90"
 				onClick={() => setOpen((value) => !value)}
 				aria-expanded={open}
 			>
@@ -365,12 +365,12 @@ function renderSubagentSpawned({ event, sessions, onSelectSession }: RenderProps
 			<div class="flex min-w-0 items-center gap-2 text-meta">
 				<span class="size-1.5 shrink-0 rounded-full bg-secondary" aria-hidden="true" />
 				<span class="shrink-0 font-medium">{agent}</span>
-				<span class="shrink-0 opacity-65">started</span>
+				<span class="shrink-0 opacity-82">started</span>
 				<span class="ml-auto flex shrink-0 items-center gap-2">
 					<HoverClock timestamp={event.timestamp} />
 				</span>
 			</div>
-			{task && <p class="mt-0.5 line-clamp-2 whitespace-pre-wrap text-meta leading-snug opacity-55">{task}</p>}
+			{task && <p class="mt-0.5 line-clamp-2 whitespace-pre-wrap text-meta leading-snug opacity-75">{task}</p>}
 			{childId && <OpenSessionButton id={childId} name={agent} onSelectSession={onSelectSession} />}
 		</div>
 	);
@@ -391,13 +391,13 @@ function renderSubagentCompleted({ event, sessions, onSelectSession }: RenderPro
 			<div class="flex min-w-0 items-center gap-2 text-meta">
 				<span class={`size-1.5 shrink-0 rounded-full ${ok ? "bg-success" : "bg-error"}`} aria-hidden="true" />
 				<span class="shrink-0 font-medium">{agent}</span>
-				<span class="shrink-0 opacity-65">{ok ? "finished" : "failed"}</span>
-				{duration && <span class="shrink-0 font-mono text-micro opacity-60">{duration}</span>}
+				<span class="shrink-0 opacity-82">{ok ? "finished" : "failed"}</span>
+				{duration && <span class="shrink-0 font-mono text-micro opacity-80">{duration}</span>}
 				<span class="ml-auto flex shrink-0 items-center gap-2">
 					<HoverClock timestamp={event.timestamp} />
 				</span>
 			</div>
-			{summary && <p class="mt-0.5 line-clamp-3 whitespace-pre-wrap text-meta leading-snug opacity-55">{summary}</p>}
+			{summary && <p class="mt-0.5 line-clamp-3 whitespace-pre-wrap text-meta leading-snug opacity-75">{summary}</p>}
 			{childId && <OpenSessionButton id={childId} name={agent} onSelectSession={onSelectSession} />}
 		</div>
 	);
@@ -419,7 +419,7 @@ function renderWorkState({ event, showSubagent, sessions, onSelectSession, onOpe
 					<SubagentTag event={event} sessions={sessions} onSelectSession={onSelectSession} />
 				)}
 				<span class="text-body font-semibold">{title}</span>
-				<time class="ml-auto font-mono text-micro opacity-65">{clock(event.timestamp)}</time>
+				<time class="ml-auto font-mono text-micro opacity-82">{clock(event.timestamp)}</time>
 			</div>
 			{body && (
 				<div class="mt-1 text-body">
@@ -452,7 +452,7 @@ function renderSystem({ event }: RenderProps) {
 	const label = SYSTEM_LABELS[event.type] ?? event.type;
 	const detail = pickString(event, ["title", "model", "cwd", "agentName"]) || event.agentName || "";
 	return (
-		<div class="flex items-center gap-2 py-1 text-micro uppercase tracking-wide opacity-55">
+		<div class="flex items-center gap-2 py-1 text-micro uppercase tracking-wide opacity-75">
 			<span class="h-px flex-1 bg-base-300" />
 			<span class="shrink-0">
 				{label}
@@ -523,9 +523,9 @@ function EventRow({
 					<div class="rounded-box border border-base-300 bg-base-200/40 p-2 font-mono text-meta">
 						<div class="flex items-center gap-2">
 							<span class="badge badge-ghost badge-xs">{event.type}</span>
-							<time class="ml-auto text-micro opacity-65">{clock(event.timestamp)}</time>
+							<time class="ml-auto text-micro opacity-82">{clock(event.timestamp)}</time>
 						</div>
-						<pre class="mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap opacity-60">
+						<pre class="mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap opacity-80">
 							{fieldText(event.data)}
 						</pre>
 					</div>
@@ -533,7 +533,7 @@ function EventRow({
 			}
 	}
 	return (
-		<div class="fade-in" data-testid="feed-event" data-event-type={event.type}>
+		<div data-testid="feed-event" data-event-type={event.type}>
 			{showSubagent && event.type !== "work_state" && (
 				<div class="mb-1">
 					<SubagentTag event={event} sessions={sessions} onSelectSession={onSelectSession} />
@@ -665,7 +665,7 @@ export function ActivityFeed({
 			>
 				{selected?.isSubagent && (
 					<div class="sticky top-0 z-10 mb-3 rounded-box border border-base-300 border-l-4 border-l-secondary bg-base-200/95 p-3 backdrop-blur">
-						<div class="mb-1 text-micro uppercase tracking-wide opacity-70">task</div>
+						<div class="mb-1 text-micro uppercase tracking-wide opacity-85">task</div>
 						<div class="text-body">
 							<MarkdownText text={selected.task ?? "No task recorded"} />
 						</div>
@@ -673,7 +673,7 @@ export function ActivityFeed({
 				)}
 				{visible.length === 0 ? (
 					<div class="flex h-full items-center justify-center p-8">
-						<div class="text-center text-body opacity-60">
+						<div class="text-center text-body opacity-80">
 							<p class="font-semibold">No activity yet</p>
 							<p class="mt-1 text-meta">
 								{selected?.isSubagent
