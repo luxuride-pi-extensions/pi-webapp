@@ -1,6 +1,6 @@
 {
 	"name": "pi-webapp",
-	"version": "0.4.3",
+	"version": "0.4.4",
 	"description": "Browser dashboard for pi coding-agent sessions: live activity, subagent trees, prompts, screenshots and Playwright recordings.",
 	"type": "module",
 	"license": "MIT",

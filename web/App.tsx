@@ -99,7 +99,7 @@ function TopBar({
 	const dirs = leech?.dirs ?? [];
 	return (
 		<header class="flex items-center gap-3 border-b border-base-300 bg-base-200/80 px-3 py-1.5">
-			<span class="text-body font-semibold tracking-tight">pi-webapp</span>
+			<span class="text-meta font-semibold tracking-tight">pi-webapp</span>
 			<span
 				class="flex items-center gap-1.5 text-meta opacity-80"
 				title={live ? "WebSocket connected" : "Reconnecting to the dashboard server"}
@@ -126,7 +126,7 @@ function TopBar({
 				<span class="join shrink-0 rounded-lg border border-base-300/70 bg-base-200/40">
 					<button
 						type="button"
-						class={`btn btn-square btn-sm join-item w-9 ${expandAll ? "btn-secondary" : "btn-ghost text-base-content/70"}`}
+						class={`btn btn-square btn-sm join-item w-9 ${expandAll ? "btn-secondary" : "btn-ghost text-body-content/70"}`}
 						onClick={onToggleExpand}
 						aria-pressed={expandAll}
 						aria-label={expandAll ? "Collapse everything" : "Expand all sessions, subagents and messages"}
@@ -223,7 +223,7 @@ function SessionHeader({
 			<div class="flex min-w-0 items-center gap-2">
 				<StatusBadge status={session.status} source={session.source} size="xs" />
 				<ActivityBadge session={session} />
-				<h1 class="min-w-0 truncate text-body font-semibold" title={session.id}>
+				<h1 class="min-w-0 truncate text-body font-semibold leading-tight" title={session.id}>
 					{name}
 				</h1>
 				{subtitle && <span class="hidden min-w-0 truncate text-meta opacity-82 lg:inline">— {subtitle}</span>}
@@ -231,7 +231,7 @@ function SessionHeader({
 					{canTakeOver && (
 						<button
 							type="button"
-							class="btn btn-ghost btn-sm btn-square w-9 text-base-content/70"
+							class="btn btn-ghost btn-sm btn-square w-9 text-body-content/70"
 							disabled={busy}
 							onClick={() => onTakeOver?.(session)}
 							aria-label="Take over this session"
@@ -657,7 +657,7 @@ export function App() {
 	const leech = state?.leech ?? null;
 
 	return (
-		<div data-testid="app-root" class="flex h-[100dvh] flex-col overflow-hidden bg-base-100 text-base-content">
+		<div data-testid="app-root" class="flex h-[100dvh] flex-col overflow-hidden bg-base-100 text-body-content">
 			<TopBar
 				status={status}
 				sessions={counts.sessions}
@@ -672,7 +672,7 @@ export function App() {
 				onToggleExpand={toggleExpand}
 			/>
 			<div class="flex min-h-0 flex-1">
-				<aside class="w-72 shrink-0 overflow-y-auto border-r border-base-300 bg-base-200">
+				<aside class="w-80 shrink-0 overflow-y-auto border-r border-base-300 bg-base-200">
 					<SessionTree
 						sessions={sessions}
 						selectedSessionId={selected?.id ?? null}
@@ -791,7 +791,7 @@ export function App() {
 			{renameTarget && (
 				<div class="modal modal-open" role="dialog" aria-modal="true" aria-labelledby="rename-title">
 					<div class="modal-box max-w-md border border-base-300">
-						<h3 id="rename-title" class="text-base font-semibold">
+						<h3 id="rename-title" class="text-body font-semibold">
 							Rename session
 						</h3>
 						<p class="py-2 text-meta opacity-85">
@@ -836,7 +836,7 @@ export function App() {
 			{takeoverTarget && (
 				<div class="modal modal-open" role="dialog" aria-modal="true" aria-labelledby="takeover-title">
 					<div class="modal-box max-w-md border border-base-300">
-						<h3 id="takeover-title" class="text-base font-semibold">
+						<h3 id="takeover-title" class="text-body font-semibold">
 							Take over this session?
 						</h3>
 						<p class="py-2 text-body opacity-80">
@@ -871,7 +871,7 @@ export function App() {
 			{removeTarget && (
 				<div class="modal modal-open" role="dialog" aria-modal="true" aria-labelledby="remove-title">
 					<div class="modal-box max-w-md border border-base-300">
-						<h3 id="remove-title" class="text-base font-semibold">
+						<h3 id="remove-title" class="text-body font-semibold">
 							Remove session?
 						</h3>
 						<p class="py-2 text-body opacity-80">

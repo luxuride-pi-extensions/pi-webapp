@@ -122,7 +122,10 @@ function TreeRow({
 	siblings,
 }: TreeRowProps) {
 	const { session, children } = node;
-	const name = uniqueSessionName(session, siblings);
+	const label = uniqueSessionName(session, siblings);
+	const [name, ...suffixParts] = label.split(" · ");
+	// The sidebar is narrow: four hex characters are enough to tell twins apart.
+	const suffix = suffixParts.length > 0 ? session.id.slice(0, 4) : "";
 	const selected = selectedSessionId === session.id;
 	const hasChildren = children.length > 0;
 	const expanded = hasChildren && expandedIds.has(session.id);
@@ -173,7 +176,8 @@ function TreeRow({
 					aria-current={selected ? "true" : undefined}
 				>
 					<span class="size-1.5 shrink-0 rounded-full" style={{ backgroundColor: agentColor(name) }} aria-hidden="true" />
-					<span class={`truncate text-body ${session.isSubagent ? "font-normal" : "font-medium"}`}>{name}</span>
+					<span class={`truncate text-meta ${session.isSubagent ? "font-normal" : "font-medium"}`}>{name}</span>
+					{suffix && <span class="shrink-0 font-mono text-caption opacity-60">{suffix}</span>}
 					{session.busy === true ? (
 						<span
 							class="size-1.5 shrink-0 rounded-full bg-info"
@@ -198,7 +202,7 @@ function TreeRow({
 						</span>
 					)}
 					{hasChildren && !expanded && (
-						<span class="shrink-0 font-mono text-micro opacity-82" title={`${children.length} subagent(s)`}>
+						<span class="shrink-0 font-mono text-caption opacity-82" title={`${children.length} subagent(s)`}>
 							+{children.length}
 						</span>
 					)}
@@ -386,7 +390,7 @@ export function SessionTree({
 					</span>
 					<input
 						type="search"
-						class="grow bg-transparent text-meta outline-none placeholder:opacity-85"
+						class="grow bg-transparent text-meta outline-none placeholder:opacity-70"
 						placeholder="Filter sessions…"
 						value={query}
 						onInput={(event) => setQuery((event.target as HTMLInputElement).value)}
@@ -396,7 +400,7 @@ export function SessionTree({
 					{query && (
 						<button
 							type="button"
-							class="text-meta opacity-85 hover:opacity-100"
+							class="text-caption opacity-85 hover:opacity-100"
 							onClick={() => setQuery("")}
 							aria-label="Clear filter"
 						>
@@ -404,12 +408,12 @@ export function SessionTree({
 						</button>
 					)}
 				</label>
-				<div class="flex items-center gap-0.5 text-meta">
+				<div class="flex items-center gap-0.5 text-caption">
 					{(["all", "live"] as const).map((value) => (
 						<button
 							key={value}
 							type="button"
-							class={`btn btn-ghost btn-xs h-6 min-h-0 px-2 font-normal ${statusFilter === value ? "bg-base-300 text-base-content" : "opacity-85"}`}
+							class={`btn btn-ghost btn-xs h-6 min-h-0 px-2 font-normal ${statusFilter === value ? "bg-base-300 text-body-content" : "opacity-85"}`}
 							aria-pressed={statusFilter === value}
 							onClick={() => setStatusFilter(value)}
 							data-testid="status-filter"

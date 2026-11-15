@@ -39,7 +39,7 @@ function renderInlineToken(token: Token, key: string): ComponentChildren {
 			return (token as Tokens.Escape).text;
 		case "strong":
 			return (
-				<strong key={key} class="font-semibold text-base-content">
+				<strong key={key} class="font-semibold text-body-content">
 					{inline((token as Tokens.Strong).tokens, { prefix: key })}
 				</strong>
 			);
@@ -122,9 +122,9 @@ function renderBlockToken(token: Token, key: string): ComponentChildren {
 			const heading = token as Tokens.Heading;
 			const body = inline(heading.tokens, { prefix: key });
 			const cls = "mt-3 mb-1 font-semibold first:mt-0";
-			if (heading.depth === 1) return <h1 key={key} class={`${cls} text-lg`}>{body}</h1>;
-			if (heading.depth === 2) return <h2 key={key} class={`${cls} text-base`}>{body}</h2>;
-			if (heading.depth === 3) return <h3 key={key} class={`${cls} text-[0.95rem]`}>{body}</h3>;
+			if (heading.depth === 1) return <h1 key={key} class={`${cls} text-h1`}>{body}</h1>;
+			if (heading.depth === 2) return <h2 key={key} class={`${cls} text-h2`}>{body}</h2>;
+			if (heading.depth === 3) return <h3 key={key} class={`${cls} text-h3`}>{body}</h3>;
 			return <h4 key={key} class={`${cls} text-body uppercase tracking-wide opacity-80`}>{body}</h4>;
 		}
 		case "paragraph":
@@ -146,8 +146,8 @@ function renderBlockToken(token: Token, key: string): ComponentChildren {
 			const list = token as Tokens.List;
 			const items = list.items.map((item, index) => renderBlockToken(item, `${key}-${index}`));
 			const cls = list.ordered
-				? "my-1.5 list-decimal space-y-0.5 pl-5 marker:text-base-content/40"
-				: "my-1.5 list-disc space-y-0.5 pl-5 marker:text-base-content/40";
+				? "my-1.5 list-decimal space-y-0.5 pl-5 marker:text-body-content/40"
+				: "my-1.5 list-disc space-y-0.5 pl-5 marker:text-body-content/40";
 			return list.ordered ? (
 				<ol key={key} start={typeof list.start === "number" ? list.start : undefined} class={cls}>
 					{items}

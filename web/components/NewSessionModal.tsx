@@ -82,7 +82,7 @@ export function NewSessionModal({ open, defaultCwd, startSession, onSpawned, onC
 			<div class="modal-box w-full max-w-lg bg-base-200">
 				<div class="flex items-start gap-2">
 					<div class="min-w-0 flex-1">
-						<h2 id="new-session-title" class="text-base font-semibold">
+						<h2 id="new-session-title" class="text-body font-semibold">
 							Start a pi session
 						</h2>
 						<p class="mt-0.5 text-meta opacity-80">
