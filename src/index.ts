@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { createBridge } from "./bridge.js";
+import { daemonStatus, startDetachedDaemon, stopDetachedDaemon } from "./daemonctl.js";
 import type { BridgeRuntime } from "./bridge.js";
 import {
 	DEFAULT_HOST,
@@ -312,10 +313,61 @@ export default function piWebapp(pi: ExtensionAPI): void {
 	pi.registerTool(createPostWorkStateTool(getToolRuntime));
 	pi.registerTool(createCapturePlaywrightTool(getToolRuntime));
 
+	const handleDaemonCommand = async (action: string | undefined, portArg?: string): Promise<void> => {
+		const verb = action && action.length > 0 ? action : "start";
+		const requestedPort = portArg && /^\d+$/.test(portArg) ? Number(portArg) : undefined;
+		try {
+			if (verb === "start") {
+				const result = await startDetachedDaemon(requestedPort === undefined ? {} : { port: requestedPort });
+				notify(
+					result.alreadyRunning
+						? `pi-webapp dashboard is already running: ${result.url}`
+						: `pi-webapp dashboard started in the background: ${result.url}${result.pid ? ` (pid ${result.pid})` : ""}`,
+					"info",
+				);
+				return;
+			}
+			if (verb === "stop") {
+				const result = await stopDetachedDaemon();
+				notify(
+					`pi-webapp dashboard stopped${result.pid ? ` (pid ${result.pid})` : ""}${result.detail ? `: ${result.detail}` : ""}`,
+					"info",
+				);
+				return;
+			}
+			if (verb === "status") {
+				const status = await daemonStatus();
+				notify(
+					[
+						`pi-webapp daemon: ${status.running ? "running" : "not running"}`,
+						`URL: ${status.url}`,
+						status.pid ? `PID: ${status.pid}` : "PID: (not managed by pi-webapp)",
+						status.detail ?? "",
+					]
+						.filter(Boolean)
+						.join("\n"),
+					"info",
+				);
+				return;
+			}
+			notify("Usage: /webapp [status] | /webapp daemon [start|stop|status]", "warning");
+		} catch (error) {
+			notify(`pi-webapp: ${error instanceof Error ? error.message : String(error)}`, "error");
+		}
+	};
+
 	pi.registerCommand("webapp", {
-		description: "Show the pi-webapp dashboard URL, mode and leech status",
-		handler: async (_args, ctx) => {
+		description: "Show the pi-webapp dashboard URL/mode, or manage the standalone daemon",
+		handler: async (args, ctx) => {
 			ctxRef = ctx;
+			const words = (args ?? "").trim().split(/\s+/);
+			const sub = words[0]?.toLowerCase() ?? "";
+
+			if (sub === "daemon" || sub === "start" || sub === "stop" || sub === "status") {
+				await handleDaemonCommand(sub === "daemon" ? words[1] : sub, sub === "daemon" || sub === "start" ? words[2] : undefined);
+				return;
+			}
+
 			await ensureBridge();
 			const activeBridge = bridge;
 			if (!activeBridge) {

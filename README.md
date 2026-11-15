@@ -43,22 +43,39 @@ Requires **Node.js >= 22.19**. Published packages ship compiled assets in `dist/
 pi
 ```
 
-Start a session or send it a prompt, then open **http://127.0.0.1:8787** in a browser. To run the dashboard without a `pi` process, see [Standalone daemon](#standalone-daemon).
+Start a session or send it a prompt, then open **http://127.0.0.1:8787** in a browser. That is the whole setup: the dashboard lives inside `pi`, so it is there whenever you are working. To keep it running with no `pi` process, use `/webapp daemon start` (see [Standalone daemon](#standalone-daemon)).
+
+### Commands
+
+Inside `pi`:
+
+| Command | What it does |
+| --- | --- |
+| `/webapp` | Show the dashboard URL, primary/secondary mode and leech status. |
+| `/webapp daemon start [port]` | Start a detached dashboard that keeps running after `pi` exits (default port from `PI_WEBAPP_PORT`, else `8787`). Prints the URL; safe to run twice. |
+| `/webapp daemon status` | Is a daemon running, on which URL, with which pid. |
+| `/webapp daemon stop` | Gracefully stop the daemon started by `pi-webapp` (pid file, `SIGTERM`, then `SIGKILL` after 6s). |
 
 ## Standalone daemon
 
 The extension only runs while a `pi` process is alive: no `pi`, no dashboard. The same server also ships as a standalone daemon, so the dashboard can be always-on — a systemd service, a tmux session, a machine you leave open — with no agent running. It serves the dashboard, tails session files, accepts `pi` processes as they join, and can start new sessions from the browser.
 
-```bash
-node bin/pi-webapp.mjs               # from a checkout (dist/ is committed and prebuilt)
-npm install -g /path/to/pi-webapp    # global: links the `pi-webapp` command
-pi-webapp serve                      # then run it from anywhere
-npx pi-webapp                        # once the package is published on npm
+You do not need a PATH entry or a global install to use it:
+
+```text
+/webapp daemon start          # from inside pi — starts a detached dashboard on 8787
+/webapp daemon start 9000     # ...or on another port, next to this pi's own dashboard
+/webapp daemon stop           # stops the one pi-webapp started
 ```
 
-`pi install git:github.com/luxuride-pi-extensions/pi-webapp` also gives you a daemon
-binary at `~/.pi/agent/git/github.com/luxuride-pi-extensions/pi-webapp/bin/pi-webapp.mjs`
-(use that path in the systemd unit below).
+Or run the CLI directly from a checkout / from the `pi install`ed copy:
+
+```bash
+node bin/pi-webapp.mjs serve                      # checkout
+node ~/.pi/agent/git/github.com/luxuride-pi-extensions/pi-webapp/bin/pi-webapp.mjs serve   # after `pi install git:...`
+```
+
+If you want a `pi-webapp` command on your PATH, install the package globally from a checkout or a `npm pack` tarball (`npm install -g /path/to/pi-webapp`). The name `pi-webapp` on npm belongs to an unrelated package, so there is no `npx pi-webapp`.
 
 `serve` is optional: `pi-webapp` and `pi-webapp serve` are the same command. The daemon prints its URL and then serves until it is asked to stop:
 
@@ -67,7 +84,7 @@ pi-webapp listening on http://127.0.0.1:8787
 sessions can be started from the dashboard (pi)
 ```
 
-On `SIGINT`, `SIGTERM` or `SIGHUP` it closes the WebSockets, kills the `pi` processes it started and frees the port. With no `pi` running it still serves the dashboard and leeches session files; any `pi` that loads the extension joins as a live instance (see [Multi-instance setups](#multi-instance-setups)).
+On `SIGINT`, `SIGTERM` or `SIGHUP` it closes the WebSockets, kills the `pi` processes it started and frees the port. A daemon started from `pi` writes `~/.pi/cache/pi-webapp/daemon.pid` (or `$PI_WEBAPP_CACHE_DIR/daemon.pid`) and removes it on exit, which is what `/webapp daemon stop|status` reads. With no `pi` running it still serves the dashboard and leeches session files; any `pi` that loads the extension joins as a live instance (see [Multi-instance setups](#multi-instance-setups)).
 
 | Flag | Default | Description |
 | --- | --- | --- |
@@ -277,7 +294,8 @@ Launchers that use the older variable names are supported too: `PI_PARENT_SESSIO
 | --- | --- |
 | `src/protocol.ts` | Shared wire contract: event/session types, defaults, env names, helpers. Dependency-free so the browser bundle can import it. |
 | `src/index.ts` | pi extension entry point: starts or joins the server, translates pi session events, registers tools, propagates subagent env. |
-| `src/daemon.ts` | `pi-webapp serve`: flag parsing, daemon bootstrap, help/version output and signal handling. |
+| `src/daemon.ts` | `pi-webapp serve`: flag parsing, daemon bootstrap, pid file, help/version output and signal handling. |
+| `src/daemonctl.ts` | Detached-daemon control used by `/webapp daemon start|stop|status`: health probe, pid file, start/stop lifecycle. |
 | `src/server.ts` | HTTP + WebSocket server: static assets, `/api/*`, artifact streaming with `Range`, prompt routing, instance registry, spawn routes. |
 | `src/spawn.ts` | `SessionSpawner`: launches `pi --mode rpc`, tracks spawn records, captures logs and stops children. |
 | `src/storage.ts` | Artifact cache helpers: `ingestArtifact` copies screenshots/recordings into the cache, MIME lookup, cache-root resolution and pruning. |
@@ -288,6 +306,7 @@ Launchers that use the older variable names are supported too: `PI_PARENT_SESSIO
 | `bin/pi-webapp.mjs` | Executable shim for the standalone daemon; loads `dist/daemon.js`. |
 | `web/main.tsx`, `web/*` | Preact dashboard: feed, subagent tree, work-state panel, prompt box. |
 | `scripts/build.mjs` | Build pipeline (tsc, Tailwind CLI, esbuild, static shell). |
+| `scripts/prepare.mjs` | `prepare` hook: reuses the committed `dist/` unless it is incomplete or `PI_WEBAPP_FORCE_BUILD=1`. |
 
 ### Request and event flow
 

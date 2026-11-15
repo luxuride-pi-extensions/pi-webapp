@@ -9,6 +9,7 @@
 import { createRequire } from "node:module";
 import path from "node:path";
 import { DEFAULT_HOST, DEFAULT_PORT, ENV } from "./protocol.js";
+import { removeDaemonPidFile, writeDaemonPidInfo } from "./daemonctl.js";
 import { WebappServer } from "./server.js";
 import { SessionSpawner, isLoopbackUrl } from "./spawn.js";
 export async function startDaemon(options = {}) {
@@ -41,10 +42,18 @@ export async function startDaemon(options = {}) {
         server.setSessionSpawner(spawner);
     }
     server.setLocalPromptHandler(null);
+    writeDaemonPidInfo({
+        pid: process.pid,
+        url: server.url,
+        host,
+        port: server.port ?? port,
+        startedAt: Date.now(),
+    });
     return {
         url: server.url,
         spawner,
         async stop() {
+            removeDaemonPidFile();
             try {
                 spawner?.stopAll();
             }

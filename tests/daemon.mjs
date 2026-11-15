@@ -12,7 +12,7 @@
  */
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import net from "node:net";
 import os from "node:os";
@@ -182,6 +182,21 @@ try {
 		10_000,
 	);
 
+	console.log("▶ pid file");
+	const pidFile = path.join(tmpRoot, "cache", "daemon.pid");
+	const pidInfo = await waitFor("daemon pid file", () => {
+		if (!existsSync(pidFile)) return null;
+		try {
+			const parsed = JSON.parse(readFileSync(pidFile, "utf8"));
+			return typeof parsed.pid === "number" ? parsed : null;
+		} catch {
+			return null;
+		}
+	});
+	assert.equal(pidInfo.pid, daemon.pid, "daemon.pid must record the running daemon pid");
+	assert.equal(pidInfo.port, port, "daemon.pid must record the listening port");
+	assert.equal(pidInfo.url, baseUrl, "daemon.pid must record the dashboard URL");
+
 	console.log("▶ dashboard assets and spawn state");
 	const indexResponse = await fetch(`${baseUrl}/`);
 	assert.equal(indexResponse.status, 200, "GET / must serve the dashboard");
@@ -262,6 +277,7 @@ try {
 	assert.equal(exitInfo.code, 0, `daemon must exit 0 after SIGTERM, got code ${exitInfo.code} signal ${exitInfo.signal}`);
 
 	await waitFor(`port ${port} to be released`, () => isPortFree(port), 5_000);
+	assert.equal(existsSync(pidFile), false, "the daemon must remove its pid file on shutdown");
 } catch (error) {
 	failure = error;
 } finally {
