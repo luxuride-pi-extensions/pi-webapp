@@ -122,75 +122,70 @@ function TopBar({
 					</span>
 				)}
 			</span>
-			<div class="ml-auto flex items-center gap-1">
+			<div class="ml-auto flex shrink-0 items-center gap-2 pr-1">
+				<span class="join shrink-0 rounded-lg border border-base-300/70 bg-base-200/40">
+					<button
+						type="button"
+						class={`btn btn-square btn-sm join-item w-9 ${expandAll ? "btn-secondary" : "btn-ghost"}`}
+						onClick={onToggleExpand}
+						aria-pressed={expandAll}
+						aria-label={expandAll ? "Collapse everything" : "Expand all sessions, subagents and messages"}
+						title={
+							expandAll
+								? "Expanded: subagents, thinking and tool output are open"
+								: "Expand every session, subagent, thinking block and tool output"
+						}
+						data-testid="expand-all"
+					>
+						<svg class="size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+							{expandAll ? (
+								<path d="M6 3v10M3 6l3-3 3 3M10 13V3m3 7-3 3-3-3" stroke-linecap="round" stroke-linejoin="round" />
+							) : (
+								<path d="M6 10 3 13M10 6l3-3M3 10v3h3M13 6V3h-3" stroke-linecap="round" stroke-linejoin="round" />
+							)}
+						</svg>
+					</button>
+					<button
+						type="button"
+						class="btn btn-square btn-ghost btn-sm join-item"
+						onClick={onRescan}
+						disabled={scanning}
+						aria-label="Rescan session files"
+						title="Rescan session files for leeched sessions"
+					>
+						{scanning ? (
+							<span class="loading loading-spinner loading-xs" />
+						) : (
+							<svg class="size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+								<path d="M13 8a5 5 0 1 1-1.6-3.7M13 2.5V5h-2.5" stroke-linecap="round" stroke-linejoin="round" />
+							</svg>
+						)}
+					</button>
+					<a
+						class="btn btn-square btn-ghost btn-sm join-item"
+						href={REPO_URL}
+						target="_blank"
+						rel="noreferrer"
+						aria-label="Open the pi-webapp repository"
+						title="github.com/luxuride-pi-extensions/pi-webapp"
+					>
+						<svg class="size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+							<path d="M6 3H3v10h10v-3M9 3h4v4M13 3 7.5 8.5" stroke-linecap="round" stroke-linejoin="round" />
+						</svg>
+					</a>
+				</span>
 				<button
 					type="button"
-					class="btn btn-primary btn-xs gap-1"
+					class="btn btn-primary btn-sm gap-1"
 					onClick={onNewSession}
 					disabled={!spawnEnabled}
 					title={spawnEnabled ? "Start a new pi session in a working directory" : SPAWN_DISABLED_HINT}
 				>
-					<svg
-						class="size-3"
-						viewBox="0 0 16 16"
-						fill="none"
-						stroke="currentColor"
-						stroke-width="1.8"
-						aria-hidden="true"
-					>
+					<svg class="size-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
 						<path d="M8 3.25v9.5M3.25 8h9.5" stroke-linecap="round" />
 					</svg>
 					New
 				</button>
-				<button
-					type="button"
-					class={`btn btn-square btn-xs ${expandAll ? "btn-secondary" : "btn-ghost"}`}
-					onClick={onToggleExpand}
-					aria-pressed={expandAll}
-					aria-label={expandAll ? "Collapse everything" : "Expand all sessions, subagents and messages"}
-					title={
-						expandAll
-							? "Expanded: subagents, thinking and tool output are open"
-							: "Expand every session, subagent, thinking block and tool output"
-					}
-					data-testid="expand-all"
-				>
-					<svg class="size-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
-						{expandAll ? (
-							<path d="M6 3v10M3 6l3-3 3 3M10 13V3m3 7-3 3-3-3" stroke-linecap="round" stroke-linejoin="round" />
-						) : (
-							<path d="M6 10 3 13M10 6l3-3M3 10v3h3M13 6V3h-3" stroke-linecap="round" stroke-linejoin="round" />
-						)}
-					</svg>
-				</button>
-				<button
-					type="button"
-					class="btn btn-square btn-ghost btn-xs"
-					onClick={onRescan}
-					disabled={scanning}
-					aria-label="Rescan session files"
-					title="Rescan session files for leeched sessions"
-				>
-					{scanning ? (
-						<span class="loading loading-spinner loading-xs" />
-					) : (
-						<svg class="size-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
-							<path d="M13 8a5 5 0 1 1-1.6-3.7M13 2.5V5h-2.5" stroke-linecap="round" stroke-linejoin="round" />
-						</svg>
-					)}
-				</button>
-				<a
-					class="btn btn-square btn-ghost btn-xs"
-					href={REPO_URL}
-					target="_blank"
-					rel="noreferrer"
-					aria-label="Open the pi-webapp repository"
-					title="github.com/luxuride-pi-extensions/pi-webapp"
-				>
-					<svg class="size-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-						<path d="M6 3H3v10h10v-3M9 3h4v4M13 3 7.5 8.5" stroke-linecap="round" stroke-linejoin="round" />
-					</svg>
-				</a>
 			</div>
 		</header>
 	);
@@ -198,8 +193,6 @@ function TopBar({
 
 interface SessionHeaderProps {
 	session: SessionNode;
-	parent: SessionNode | null;
-	onSelect: (id: string) => void;
 	onTakeOver?: (session: SessionNode) => void;
 	onRemove?: (session: SessionNode) => void;
 	onRename?: (session: SessionNode) => void;
@@ -211,8 +204,6 @@ interface SessionHeaderProps {
 
 function SessionHeader({
 	session,
-	parent,
-	onSelect,
 	onTakeOver,
 	onRemove,
 	onRename,
@@ -240,14 +231,14 @@ function SessionHeader({
 					{canTakeOver && (
 						<button
 							type="button"
-							class="btn btn-primary btn-outline btn-xs gap-1"
+							class="btn btn-ghost btn-sm btn-square w-9"
 							disabled={busy}
 							onClick={() => onTakeOver?.(session)}
+							aria-label="Take over this session"
 							title="Resume this session in a new pi process and prompt it from here"
 							data-testid="takeover-button"
 						>
 							{busy ? <span class="loading loading-spinner loading-xs" /> : <span aria-hidden="true">↻</span>}
-							{busy ? "taking over…" : "take over"}
 						</button>
 					)}
 					{(onRename || onRemove) && (
@@ -260,7 +251,21 @@ function SessionHeader({
 							>
 								<span aria-hidden="true">⋯</span>
 							</summary>
-							<ul class="menu dropdown-content z-30 mt-1 w-44 rounded-box border border-base-300 bg-base-100 p-1 text-meta shadow">
+							<ul class="menu dropdown-content z-30 mt-1 w-48 rounded-box border border-base-300 bg-base-100 p-1 text-meta shadow">
+								{canTakeOver && (
+									<li>
+										<button
+											type="button"
+											class="justify-start"
+											disabled={busy}
+											onClick={() => onTakeOver?.(session)}
+											title="Resume this session in a new pi process and prompt it from here"
+											data-testid="takeover-menu"
+										>
+											{busy ? "Taking over…" : "Take over…"}
+										</button>
+									</li>
+								)}
 								{onRename && (
 									<li>
 										<button
@@ -471,10 +476,6 @@ export function App() {
 	const selected = useMemo(
 		() => (selectedId ? sessions.find((session) => session.id === selectedId) ?? null : null),
 		[sessions, selectedId],
-	);
-	const parent = useMemo(
-		() => (selected?.parentSessionId ? sessions.find((session) => session.id === selected.parentSessionId) ?? null : null),
-		[sessions, selected],
 	);
 	const trail = useMemo(() => {
 		const chain: SessionNode[] = [];
@@ -706,8 +707,6 @@ export function App() {
 						<>
 							<SessionHeader
 								session={selected}
-								parent={parent}
-								onSelect={selectSession}
 								onTakeOver={handleTakeOver}
 								onRemove={requestRemove}
 								onRename={requestRename}

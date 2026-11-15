@@ -72,7 +72,7 @@ export function PromptBar({ target, onSend, disabled = false, onTakeOver, taking
 						? `Busy in pi pid ${pid} — wait for the current turn to finish.`
 						: `Still open in pi pid ${pid} — take it over to prompt it from here.`}
 				</span>
-				{onTakeOver && !busy && (
+				{onTakeOver && (
 					<button
 						type="button"
 						class="btn btn-primary btn-xs ml-auto shrink-0"
@@ -104,12 +104,12 @@ export function PromptBar({ target, onSend, disabled = false, onTakeOver, taking
 					sent
 				</div>
 			)}
-			<div class="flex items-end gap-2">
+			<div class="rounded-box border border-base-300 bg-base-100 transition-colors focus-within:border-primary/60">
 				<textarea
-					class="textarea textarea-sm min-h-[3rem] flex-1 resize-none border-base-300 font-mono text-body leading-relaxed"
+					class="block w-full resize-none bg-transparent px-3 py-2 font-mono text-body leading-relaxed outline-none placeholder:opacity-45"
 					rows={2}
 					value={text}
-					placeholder={hint ?? `Message ${name}…  ⏎ send · ⇧⏎ newline`}
+					placeholder={`Message ${name}…`}
 					disabled={blocked || sending}
 					aria-label={label}
 					data-testid="prompt-input"
@@ -121,12 +121,13 @@ export function PromptBar({ target, onSend, disabled = false, onTakeOver, taking
 						}
 					}}
 				/>
-				<div class="flex flex-col gap-1">
+				<div class="flex items-center gap-2 border-t border-base-300/60 px-2 py-1.5">
 					<select
-						class="select select-xs border-base-300 font-mono text-meta"
+						class="select select-xs w-auto border-base-300 font-mono text-micro"
 						value={deliverAs}
 						disabled={sending}
 						aria-label="Delivery mode"
+						title="auto steers a running agent and queues a follow-up when idle"
 						onChange={(event) => setDeliverAs(event.currentTarget.value as DeliverAs)}
 					>
 						{DELIVERY_MODES.map((mode) => (
@@ -135,14 +136,15 @@ export function PromptBar({ target, onSend, disabled = false, onTakeOver, taking
 							</option>
 						))}
 					</select>
+					<span class="hidden text-micro opacity-45 sm:inline">⏎ send · ⇧⏎ newline</span>
 					<button
 						type="button"
-						class="btn btn-primary btn-sm whitespace-nowrap px-3"
+						class="btn btn-primary btn-sm ml-auto gap-1.5 whitespace-nowrap px-3"
 						disabled={blocked || sending || text.trim().length === 0}
 						onClick={() => void submit()}
 					>
 						{sending && <span class="loading loading-spinner loading-xs" />}
-						{sending ? "Sending…" : label}
+						{sending ? "Sending…" : "Send"}
 					</button>
 				</div>
 			</div>

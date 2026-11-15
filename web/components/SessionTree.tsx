@@ -205,10 +205,25 @@ function TreeRow({
 						{spawnActive && (
 							<span class="size-1 rounded-full bg-info" title="Started from the dashboard" aria-hidden="true" />
 						)}
-						<time class="font-mono text-micro tabular-nums opacity-60">
+						<time class="w-14 shrink-0 text-right font-mono text-micro tabular-nums opacity-0 transition-opacity group-hover:opacity-60 group-focus-within:opacity-60">
 							{relativeTime(session.updatedAt || session.startedAt)}
 						</time>
 					</span>
+				</button>
+				<button
+					type="button"
+					class="hidden shrink-0 rounded px-1 text-micro opacity-70 hover:bg-base-300 hover:opacity-100 group-hover:block focus-visible:block"
+					aria-label={`Actions for ${name}`}
+					title="Session actions"
+					data-testid="row-menu"
+					onClick={(event) => {
+						event.stopPropagation();
+						const rect = event.currentTarget.getBoundingClientRect();
+						onSelect(session.id);
+						onContextMenu(session, rect.left, rect.bottom + 4);
+					}}
+				>
+					⋯
 				</button>
 			</div>
 			{expanded && (
