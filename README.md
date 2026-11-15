@@ -338,7 +338,7 @@ pi-webapp/
 ├── web/                  Preact dashboard (Tailwind v4 + daisyUI)
 ├── scripts/build.mjs     tsc, Tailwind CLI, esbuild, static shell
 ├── tests/smoke.mjs       end-to-end smoke test
-├── dist/                 build output (shipped with the package)
+├── dist/                 build output (generated, git-ignored, shipped in the package)
 ├── package.json
 ├── tsconfig.json
 └── tsconfig.build.json
@@ -352,6 +352,12 @@ npm run typecheck  # strict TypeScript check, no emit
 npm run check      # typecheck + syntax-check the dashboard bundle
 npm test           # smoke test (requires a build)
 ```
+
+`dist/` is generated and git-ignored. `npm pack` and `pi install git:...` run the
+`prepare`/`prepublishOnly` hooks, which rebuild it, so a published or git-installed
+package always ships a working dashboard bundle even though the sources are the
+only thing committed. Re-run `npm run build` after changing `src/` or `web/` before
+testing by hand.
 
 `npm test` boots a real server on an ephemeral loopback port and walks the public contract: static assets, event ingestion, WebSocket snapshot and broadcast, `Range` streaming (206/416/traversal rejection), prompt routing (local, instance, leech, unknown) and leech tailing of a session file. It writes only to a temporary directory and exits non-zero on the first failing step, naming it.
 

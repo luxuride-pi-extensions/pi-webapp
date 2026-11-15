@@ -21,6 +21,7 @@
 		"src",
 		"web",
 		"dist",
+		"scripts",
 		"README.md",
 		"LICENSE",
 		"tsconfig.json",
