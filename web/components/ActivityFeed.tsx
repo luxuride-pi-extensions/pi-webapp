@@ -167,7 +167,7 @@ interface RenderProps {
  */
 function ClampedMarkdown({ text, expandAll = false }: { text: string; expandAll?: boolean }) {
 	const [open, setOpen] = useState(false);
-	const long = text.length > 700 || text.split("\n").length > 10;
+	const long = text.length > 1_200 || text.split("\n").length > 24;
 	if (!long || expandAll) return <MarkdownText text={text} />;
 	return (
 		<div>

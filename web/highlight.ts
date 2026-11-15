@@ -82,9 +82,10 @@ function toTokens(nodes: readonly unknown[]): HighlightToken[] {
 			continue;
 		}
 		if (!node || typeof node !== "object") continue;
-		const record = node as { kind?: unknown; children?: unknown };
-		if (typeof record.kind !== "string" || !Array.isArray(record.children)) continue;
-		tokens.push({ kind: record.kind, children: toTokens(record.children) });
+		const record = node as { scope?: unknown; children?: unknown };
+		// highlight.js nodes carry their class name in `scope` (e.g. "title function_").
+		if (typeof record.scope !== "string" || !Array.isArray(record.children)) continue;
+		tokens.push({ kind: record.scope, children: toTokens(record.children) });
 	}
 	return tokens;
 }
@@ -99,10 +100,12 @@ export function highlightTokens(code: string, language: string): HighlightToken[
 	if (!resolved) return [code];
 	try {
 		const result = hljs.highlight(code, { language: resolved, ignoreIllegals: true });
-		// highlight.js exposes the parsed token tree as `_top` (the HTML `value` is
-		// deliberately unused so model output never reaches an innerHTML sink).
-		const tree = (result as unknown as { _top?: readonly unknown[] })._top;
-		return toTokens(tree ?? []);
+		// Walk the emitter's token tree: the HTML `value` is deliberately unused so
+		// model output never reaches an innerHTML sink.
+		// SAFETY: highlight.js types hide the emitter, but the runtime result always
+		// carries `_emitter.rootNode.children` (strings and `{ scope, children }`).
+		const emitter = (result as unknown as { _emitter?: { rootNode?: { children?: readonly unknown[] } } })._emitter;
+		return toTokens(emitter?.rootNode?.children ?? []);
 	} catch {
 		return [code];
 	}

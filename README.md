@@ -17,7 +17,7 @@ A browser dashboard for [pi](https://github.com/earendil-works/pi) coding-agent 
 - **Navigation and focus** — every session has a deep link (`#/s/<sessionId>`), the sidebar has a filter box and status chips, and a sticky **expand all** toggle opens the whole tree plus every thinking block, tool output and plugin panel in the feed (persisted per browser).
 - **Separate subagent output** — subagents report into their own right-hand rail with live status and their latest message, so their turn-by-turn chatter no longer interleaves with the main agent's feed. The parent feed keeps the spawn/completion cards and any `post_work_state` they post.
 - **Take over and remove** — a leeched session can be resumed in a fresh `pi` process (`pi --session <file>`) and prompted from the browser; sessions can be removed from the dashboard, optionally deleting their transcript. Subagents are never taken over.
-- **Readable transcripts** — code blocks are syntax-highlighted (highlight.js tokens rendered as elements, never as HTML) with a copy button, and long tool output is wrapped full-width instead of squeezing the command name.
+- **Readable transcripts** — agent output is rendered as Markdown (headings, bullet/ordered and task lists, tables, quotes, links, images) together with syntax-highlighted code blocks with a copy button. Markdown is parsed into Preact elements, so raw HTML in a transcript is displayed as text instead of being executed. Long tool output is wrapped full-width instead of squeezing the command name.
 - **Model switching** — the session header lists the models the owning `pi` instance has authenticated and switches the session through `pi.setModel`, so a dashboard prompt can continue on a different model.
 - **Extensible panels** — other `pi` extensions can inject their own panels into the dashboard (todo lists, pi-lens findings, anything) without touching this package: register a directory and the UI sandboxes its files in an iframe fed with the selected session's events. See [Plugins](#plugins).
 - **Agent tools** — two tools agents can call on their own: `post_work_state` (milestone + screenshot/recording) and `capture_playwright_snapshot` (headless browser screenshot of a dev server).
@@ -395,6 +395,16 @@ Launchers that use the older variable names are supported too: `PI_PARENT_SESSIO
 | `web/main.tsx`, `web/*` | Preact dashboard: feed, subagent tree, work-state panel, prompt box. |
 | `scripts/build.mjs` | Build pipeline (tsc, Tailwind CLI, esbuild, static shell). |
 | `scripts/prepare.mjs` | `prepare` hook: reuses the committed `dist/` unless it is incomplete or `PI_WEBAPP_FORCE_BUILD=1`. |
+
+### Markdown rendering
+
+Agent messages, `work_state` descriptions and session tasks go through
+`web/components/MarkdownText.tsx`, which lexes with `marked` (GFM: tables, task
+lists, strikethrough, autolinks, `breaks: true`) and turns the tokens into
+Preact elements. Nothing is inserted with `innerHTML`: links are limited to
+`http`, `https`, `mailto` and `#`, images to `http(s)`, and raw HTML tokens are
+rendered as monospace text. Fenced code keeps the highlight.js token walker, so
+`web/highlight.ts` is the only place that decides token colours.
 
 ### Request and event flow
 
