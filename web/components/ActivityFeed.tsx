@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import type { MediaAsset, SessionNode, WebappEvent, WebappEventType } from "../../src/protocol.js";
-import { bool, mediaList, num, str } from "../../src/protocol.js";
+import { bool, mediaList, str } from "../../src/protocol.js";
 import { sessionName } from "../format";
 import { MarkdownText } from "./MarkdownText";
 import { MediaCard } from "./MediaCard";
@@ -26,9 +26,7 @@ const CHILD_FEED_TYPES = new Set<WebappEventType>([
 	"session_ended",
 	"error",
 ]);
-const SUMMARY_DETAIL_LIMIT = 160;
 /** Placeholder tool output that carries no information. */
-const OUTPUT_TOGGLE_MIN = 200;
 const EMPTY_OUTPUT = /^\(?(no output|no result|empty|undefined|null|\{\}|\[\])\)?$/i;
 
 interface ToolItem {
@@ -113,16 +111,6 @@ function succeeded(event: WebappEvent): boolean {
 	if (typeof data.ok === "boolean") return data.ok;
 	if (bool(data.isError)) return false;
 	return !pickString(event, ["error"]);
-}
-
-function durationMs(event: WebappEvent): number {
-	const data = eventData(event);
-	return num(data.durationMs) || num(data.duration) || num(data.elapsedMs);
-}
-
-function formatDuration(ms: number): string {
-	if (ms <= 0) return "";
-	return ms < 1_000 ? `${Math.round(ms)}ms` : `${(ms / 1_000).toFixed(1)}s`;
 }
 
 function resolveChildId(event: WebappEvent, sessions: SessionNode[]): string | null {
@@ -267,53 +255,64 @@ function ToolLine({ item, expandAll }: { item: ToolItem; expandAll: boolean }) {
 	const name = pickString(event, ["name", "toolName", "tool"]) || "tool";
 	const requestSource = start ?? end;
 	const request = requestSource ? oneLine(pickText(requestSource, ["summary", "input", "args", "command"]), 400) : "";
-	const output = end ? pickText(end, ["summary", "result", "output", "detail", "error"]) : "";
+	const output = end ? pickText(end, ["output", "result", "detail", "error", "summary"]) : "";
 	const ok = end ? succeeded(end) : undefined;
 	const flatOutput = output.replace(/\s+/g, " ").trim();
 	const usefulOutput =
 		output.length > 0 && !EMPTY_OUTPUT.test(flatOutput) && !request.startsWith(flatOutput.slice(0, 60));
 	const [open, setOpen] = useState(false);
 	const expanded = expandAll || open;
+	const lines = output.trim().length > 0 ? output.trim().split("\n").length : 0;
 	return (
-		<div
-			class={`group flex min-w-0 flex-col rounded px-1 py-0.5 hover:bg-base-200/50 ${
-				ok === false ? "border-l-2 border-error/50 pl-1.5" : ""
-			}`}
-			data-testid="tool-card"
-			data-event-type="tool"
-		>
-			<div class="flex min-w-0 items-baseline gap-2">
+		<div class="group flex min-w-0 flex-col" data-testid="tool-card" data-event-type="tool">
+			<div
+				class={`flex min-w-0 items-baseline gap-1.5 rounded-md px-1 py-1 hover:bg-base-200/60 ${
+					ok === false ? "bg-error/5" : ""
+				}`}
+			>
 				<span
 					class={`w-3 shrink-0 text-center font-mono text-meta ${
-						ok === undefined ? "opacity-40" : ok ? "text-success" : "text-error"
+						ok === undefined ? "text-info" : ok ? "text-success/80" : "text-error"
 					}`}
 					aria-label={ok === undefined ? "running" : ok ? "succeeded" : "failed"}
 				>
 					{ok === undefined ? "•" : ok ? "✓" : "✗"}
 				</span>
-				<span class={`shrink-0 font-mono text-meta font-medium ${ok === false ? "text-error/90" : ""}`}>{name}</span>
-				<span class="min-w-0 flex-1 truncate font-mono text-meta leading-snug opacity-80" title={request || undefined}>
+				<span
+					class={`shrink-0 rounded bg-base-300/70 px-1 py-0.5 font-mono text-caption font-medium tracking-wide ${
+						ok === false ? "text-error" : "text-base-content/85"
+					}`}
+				>
+					{name}
+				</span>
+				<span class="min-w-0 flex-1 truncate font-mono text-meta leading-snug text-base-content/60" title={request || undefined}>
 					{request}
 				</span>
 				{usefulOutput && (
 					<button
 						type="button"
-						class="shrink-0 rounded px-1 font-mono text-micro uppercase tracking-wide opacity-0 group-hover:opacity-85 focus-visible:opacity-90"
+						class={`shrink-0 rounded px-1 font-mono text-caption tabular-nums hover:text-base-content ${
+							expanded ? "text-base-content/70" : "text-base-content/35"
+						}`}
 						onClick={() => setOpen((value) => !value)}
 						aria-expanded={expanded}
-						title="Show the tool output"
+						title={expanded ? "Hide the tool output" : "Show the tool output"}
+						data-testid="output-toggle"
 					>
-						output <span aria-hidden="true">{expanded ? "▴" : "▾"}</span>
+						{lines > 0 ? `${lines} lines` : "output"} <span aria-hidden="true">{expanded ? "▴" : "▾"}</span>
 					</button>
 				)}
 			</div>
 			{usefulOutput && expanded && (
-				<pre
-					class="mt-1 ml-5 max-h-72 overflow-y-auto whitespace-pre-wrap break-words rounded border border-base-300/60 bg-base-300/25 p-2 font-mono text-meta leading-relaxed opacity-75"
-					data-testid="tool-output"
-				>
-					{output}
-				</pre>
+				<div class="relative ml-[1.125rem] border-l border-dashed border-base-300 pl-3" data-testid="output-connector">
+					<span class="absolute -top-1 left-0 size-1.5 -translate-x-1/2 rounded-full bg-base-300" aria-hidden="true" />
+					<pre
+						class="my-1 max-h-80 overflow-y-auto whitespace-pre-wrap break-words rounded-md border border-l-0 border-base-300/70 bg-base-300/20 p-2 font-mono text-meta leading-relaxed text-base-content/70"
+						data-testid="tool-output"
+					>
+						{output}
+					</pre>
+				</div>
 			)}
 		</div>
 	);
@@ -363,15 +362,16 @@ function ThoughtLine({ event, expandAll }: { event: WebappEvent; expandAll: bool
 	if (!reasoning.trim()) return null;
 	return (
 		<details class="group px-1 py-0.5" open={expandAll} data-testid="thinking">
-			<summary class="flex cursor-pointer list-none items-baseline gap-2 text-meta leading-snug">
-				<span class="w-3 shrink-0 text-center font-mono opacity-45" aria-hidden="true">
+			<summary class="flex cursor-pointer list-none items-baseline gap-1.5 rounded-md py-0.5 hover:bg-base-200/40">
+				<span class="w-3 shrink-0 text-center font-mono text-caption text-secondary/60" aria-hidden="true">
 					·
 				</span>
-				<span class="min-w-0 flex-1 truncate italic opacity-75" title={oneLine(reasoning, 400)}>
-					{oneLine(reasoning, 220)}
+				<span class="shrink-0 font-mono text-caption uppercase tracking-wide text-secondary/70">thought</span>
+				<span class="min-w-0 flex-1 truncate italic text-meta text-base-content/50" title={oneLine(reasoning, 400)}>
+					{oneLine(reasoning, 200)}
 				</span>
 			</summary>
-			<div class="thinking mt-1 ml-5 whitespace-pre-wrap border-l-2 border-base-300 pl-2 text-meta leading-relaxed opacity-85">
+			<div class="my-1 ml-[1.125rem] border-l border-dashed border-secondary/30 pl-3 text-meta italic leading-relaxed text-base-content/60">
 				{reasoning}
 			</div>
 		</details>
