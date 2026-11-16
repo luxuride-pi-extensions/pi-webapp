@@ -238,12 +238,12 @@ function renderAssistant({ event, sessions, selectedId, expandAll }: RenderProps
 		<div class="group my-1 flex flex-col items-start gap-1">
 			{speaker && <div class="text-micro font-medium uppercase tracking-wide opacity-75">{speaker}</div>}
 			{text.trim().length > 0 && (
-				<div class="max-w-[min(46rem,100%)] text-body leading-[1.7]">
+				<div class="w-full text-body leading-[1.7]">
 					<ClampedMarkdown text={text} expandAll={expandAll} />
 				</div>
 			)}
 			{reasoning && (
-				<details class="w-full max-w-[min(46rem,100%)]" open={expandAll} data-testid="thinking">
+				<details class="w-full" open={expandAll} data-testid="thinking">
 					<summary class="flex cursor-pointer list-none items-baseline gap-2 text-micro opacity-75 hover:opacity-80">
 						<span class="shrink-0 w-2 opacity-85" aria-hidden="true">▸</span>
 						<span class="shrink-0 uppercase tracking-wide">thinking</span>
@@ -502,7 +502,7 @@ function EventRow({
 		case "user_prompt":
 			content = (
 				<div class="group my-1 flex flex-col items-end gap-1">
-					<div class="max-w-[min(42rem,88%)] whitespace-pre-wrap rounded-lg rounded-tr-sm border border-primary/40 bg-primary/15 px-3 py-2 text-body leading-[1.7]">
+					<div class="whitespace-pre-wrap rounded-lg rounded-tr-sm border border-primary/40 bg-primary/15 px-3 py-2 text-body leading-[1.7]">
 						{pickText(event, ["text", "prompt", "message"])}
 					</div>
 				</div>

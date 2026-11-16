@@ -33,7 +33,7 @@ export function MediaCard({ asset, onOpenImage }: MediaCardProps) {
 	}
 
 	return (
-		<figure class={`overflow-hidden rounded-box border border-base-300 bg-base-300/25 ${span} ${isVideo ? "" : "max-w-xl"}`}>
+		<figure class={`overflow-hidden rounded-box border border-base-300 bg-base-300/25 ${span}`}>
 			{isVideo ? (
 				<video
 					class="max-h-72 w-full bg-black"
@@ -51,7 +51,7 @@ export function MediaCard({ asset, onOpenImage }: MediaCardProps) {
 					aria-label={`Open ${asset.filename}`}
 				>
 					<img
-						class="max-h-64 w-full object-cover"
+						class="max-h-[28rem] w-full object-contain"
 						src={asset.url}
 						alt={asset.filename}
 						loading="lazy"
