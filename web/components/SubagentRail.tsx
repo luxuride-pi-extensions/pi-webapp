@@ -141,22 +141,23 @@ export function SubagentRail({ session, sessions, events, onSelect }: SubagentRa
 									) : live ? (
 										<span class="size-1.5 rounded-full bg-success/60" title="Running, idle" aria-hidden="true" />
 									) : null}
-									<span class="truncate text-body font-medium">{name}</span>
-									<StatusBadge status={child.status} />
-									<span class="ml-auto font-mono text-micro opacity-82">
+									<span class="min-w-0 flex-1 truncate text-meta font-medium">{name}</span>
+									<StatusBadge status={child.status} size="xs" />
+									<span class="shrink-0 whitespace-nowrap font-mono text-caption tabular-nums opacity-70">
 										{last ? clock(last.timestamp) : ""}
 									</span>
 								</div>
-								<p class="mt-0.5 line-clamp-1 text-meta opacity-80">{child.title ?? "no task recorded"}</p>
+								{child.title && child.title !== name && (
+									<p class="mt-0.5 line-clamp-1 text-caption opacity-70">{child.title}</p>
+								)}
 								{preview && (
 									<p class="mt-1 line-clamp-3 whitespace-pre-wrap break-words text-meta leading-snug opacity-80">
 										{truncate(preview)}
 									</p>
 								)}
-								<div class="mt-1 flex items-center gap-2 font-mono text-micro opacity-82">
-									<span>{count} events</span>
-									{last && <span class="truncate">{last.type}</span>}
-									<span class="ml-auto">open →</span>
+								<div class="mt-1 flex items-center gap-2 font-mono text-caption opacity-70">
+									<span class="shrink-0">{count} events</span>
+									<span class="ml-auto shrink-0 whitespace-nowrap">open →</span>
 								</div>
 							</button>
 						</li>

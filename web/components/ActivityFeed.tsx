@@ -40,12 +40,28 @@ interface ToolItem {
 
 type TimelineItem = ToolItem | { kind: "event"; key: string; event: WebappEvent };
 
+/** A tool call or a fragment of the agent's reasoning, both read as "work". */
+type WorkEntry = ToolItem | { kind: "thought"; key: string; event: WebappEvent };
+
 type TimelineRow =
-	| { kind: "tools"; key: string; items: ToolItem[] }
+	| { kind: "work"; key: string; items: WorkEntry[] }
 	| { kind: "event"; key: string; event: WebappEvent };
 
 function callId(event: WebappEvent): string {
 	return pickString(event, ["toolCallId", "callId", "id"]);
+}
+
+function toolName(event: WebappEvent | undefined): string {
+	if (!event) return "";
+	return pickString(event, ["name", "toolName", "tool"]);
+}
+
+/** Assistant turns that only carry reasoning belong with the tools they explain. */
+function isThoughtOnly(event: WebappEvent): boolean {
+	if (event.type !== "assistant_message") return false;
+	const text = pickString(event, ["text", "message", "content"]);
+	const reasoning = pickString(event, ["reasoning", "thinking"]);
+	return text.trim().length === 0 && reasoning.trim().length > 0;
 }
 
 const SYSTEM_LABELS: Partial<Record<WebappEventType, string>> = {
@@ -267,7 +283,8 @@ function ToolLine({ item, expandAll }: { item: ToolItem; expandAll: boolean }) {
 	const event = end ?? start;
 	if (!event) return null;
 	const name = pickString(event, ["name", "toolName", "tool"]) || "tool";
-	const request = start ? oneLine(pickText(start, ["summary", "input", "args", "command"]), 400) : "";
+	const requestSource = start ?? end;
+	const request = requestSource ? oneLine(pickText(requestSource, ["summary", "input", "args", "command"]), 400) : "";
 	const output = end ? pickText(end, ["summary", "result", "output", "detail", "error"]) : "";
 	const ok = end ? succeeded(end) : undefined;
 	const duration = end ? formatDuration(durationMs(end)) : "";
@@ -278,8 +295,8 @@ function ToolLine({ item, expandAll }: { item: ToolItem; expandAll: boolean }) {
 	const expanded = expandAll || open;
 	return (
 		<div
-			class={`group flex min-w-0 flex-col rounded px-1 py-1 ${
-				ok === false ? "bg-error/10" : "hover:bg-base-200/50"
+			class={`group flex min-w-0 flex-col rounded px-1 py-0.5 hover:bg-base-200/50 ${
+				ok === false ? "border-l-2 border-error/50 pl-1.5" : ""
 			}`}
 			data-testid="tool-card"
 			data-event-type="tool"
@@ -293,7 +310,7 @@ function ToolLine({ item, expandAll }: { item: ToolItem; expandAll: boolean }) {
 				>
 					{ok === undefined ? "•" : ok ? "✓" : "✗"}
 				</span>
-				<span class="shrink-0 font-mono text-meta font-medium">{name}</span>
+				<span class={`shrink-0 font-mono text-meta font-medium ${ok === false ? "text-error/90" : ""}`}>{name}</span>
 				<span class="min-w-0 flex-1 truncate font-mono text-meta leading-snug opacity-80" title={request || undefined}>
 					{request}
 				</span>
@@ -323,12 +340,13 @@ function ToolLine({ item, expandAll }: { item: ToolItem; expandAll: boolean }) {
 	);
 }
 
-/** Consecutive tool calls read as one unit of work rather than N unrelated rows. */
-function WorkBlock({ items, expandAll }: { items: ToolItem[]; expandAll: boolean }) {
+/** Consecutive tool calls and their reasoning read as one unit of work. */
+function WorkBlock({ items, expandAll }: { items: WorkEntry[]; expandAll: boolean }) {
 	const [open, setOpen] = useState(true);
-	const running = items.some((item) => !item.end);
-	const failures = items.filter((item) => item.end && !succeeded(item.end)).length;
-	const total = items.reduce((sum, item) => sum + durationMs(item.end ?? item.start!), 0);
+	const tools = items.filter((item): item is ToolItem => item.kind === "tool");
+	const running = tools.some((item) => !item.end);
+	const failures = tools.filter((item) => item.end && !succeeded(item.end)).length;
+	const total = tools.reduce((sum, item) => sum + durationMs(item.end ?? item.start!), 0);
 	return (
 		<div class="group/block my-0.5" data-testid="work-block">
 			<button
@@ -339,7 +357,7 @@ function WorkBlock({ items, expandAll }: { items: ToolItem[]; expandAll: boolean
 			>
 				<span class="font-mono">{open ? "▾" : "▸"}</span>
 				<span>
-					{items.length} {items.length === 1 ? "step" : "steps"}
+					{tools.length} {tools.length === 1 ? "step" : "steps"}
 				</span>
 				{total > 0 && <span class="font-mono normal-case opacity-80">{formatDuration(total)}</span>}
 				{failures > 0 && <span class="text-error normal-case">{failures} failed</span>}
@@ -347,12 +365,38 @@ function WorkBlock({ items, expandAll }: { items: ToolItem[]; expandAll: boolean
 			</button>
 			{open && (
 				<div class="mt-0.5 flex flex-col gap-0.5 border-l border-base-300/70 pl-2">
-					{items.map((item) => (
-						<ToolLine key={item.key} item={item} expandAll={expandAll} />
-					))}
+					{items.map((item) =>
+						item.kind === "tool" ? (
+							<ToolLine key={item.key} item={item} expandAll={expandAll} />
+						) : (
+							<ThoughtLine key={item.key} event={item.event} expandAll={expandAll} />
+						),
+					)}
 				</div>
 			)}
 		</div>
+	);
+}
+
+/** A reasoning step sits between the tool calls it explains, dim and one line. */
+function ThoughtLine({ event, expandAll }: { event: WebappEvent; expandAll: boolean }) {
+	const reasoning = pickString(event, ["reasoning", "thinking"]);
+	if (!reasoning.trim()) return null;
+	return (
+		<details class="group px-1 py-0.5" open={expandAll} data-testid="thinking">
+			<summary class="flex cursor-pointer list-none items-baseline gap-2 text-meta leading-snug">
+				<span class="w-3 shrink-0 text-center font-mono opacity-45" aria-hidden="true">
+					·
+				</span>
+				<span class="min-w-0 flex-1 truncate italic opacity-75" title={oneLine(reasoning, 400)}>
+					{oneLine(reasoning, 220)}
+				</span>
+				<HoverClock timestamp={event.timestamp} />
+			</summary>
+			<div class="thinking mt-1 ml-5 whitespace-pre-wrap border-l-2 border-base-300 pl-2 text-meta leading-relaxed opacity-85">
+				{reasoning}
+			</div>
+		</details>
 	);
 }
 
@@ -412,7 +456,7 @@ function renderWorkState({ event, showSubagent, sessions, onSelectSession, onOpe
 	const media = mediaList(data.media);
 	const assets = media.length > 0 ? media : mediaList(data.artifacts);
 	return (
-		<div class="rounded-box border border-base-300 bg-base-200 p-3">
+		<div class="rounded-box border border-base-300 bg-base-100/40 p-3">
 			<div class="flex flex-wrap items-center gap-2">
 				<span class="badge badge-info badge-xs">work state</span>
 				{showSubagent && (
@@ -438,7 +482,7 @@ function renderWorkState({ event, showSubagent, sessions, onSelectSession, onOpe
 				</a>
 			)}
 			{assets.length > 0 && (
-				<div class="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+				<div class={`mt-2 grid grid-cols-1 gap-2 ${assets.length > 1 ? "sm:grid-cols-2" : ""}`}>
 					{assets.map((asset, index) => (
 						<MediaCard key={`${asset.url}-${index}`} asset={asset} onOpenImage={onOpenImage} />
 					))}
@@ -568,48 +612,99 @@ export function ActivityFeed({
 						event.sessionId === selected.id ||
 						(event.parentSessionId === selected.id && CHILD_FEED_TYPES.has(event.type)),
 				);
-		return rows.slice().sort((a, b) => a.timestamp - b.timestamp || a.id.localeCompare(b.id));
+		return rows
+			.filter((event) => event.type !== "session_started")
+			.slice()
+			.sort((a, b) => a.timestamp - b.timestamp || a.id.localeCompare(b.id));
 	}, [events, selected]);
 
 	// Pair each tool call with its result so one call renders as one row.
 	const timeline = useMemo<TimelineItem[]>(() => {
-		const ends = new Map<string, WebappEvent>();
-		for (const event of visible) {
-			if (event.type !== "tool_end") continue;
+		const calls = visible.filter((event) => event.type === "tool_start" || event.type === "tool_end");
+		const starts = new Map<string, number[]>();
+		const pairedStart = new Set<number>();
+		const pairedEnd = new Set<number>();
+		const pairOf = new Map<number, number>();
+		calls.forEach((event, index) => {
+			if (event.type !== "tool_start") return;
 			const id = callId(event);
-			if (id) ends.set(id, event);
-		}
-		const emitted = new Set<string>();
+			if (!id) return;
+			const bucket = starts.get(id) ?? [];
+			bucket.push(index);
+			starts.set(id, bucket);
+		});
+		// First pass: match on the provider's call id, which live events always carry.
+		calls.forEach((event, index) => {
+			if (event.type !== "tool_end") return;
+			const id = callId(event);
+			if (!id) return;
+			const startIndex = starts.get(id)?.find((candidate) => !pairedStart.has(candidate));
+			if (startIndex === undefined) return;
+			pairedStart.add(startIndex);
+			pairedEnd.add(index);
+			pairOf.set(startIndex, index);
+		});
+		// Second pass: leeched or synthetic events can omit the call id, so fall
+		// back to the nearest unmatched call of the same tool.
+		calls.forEach((event, index) => {
+			if (event.type !== "tool_end" || pairedEnd.has(index)) return;
+			const name = toolName(event);
+			for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+				const candidate = calls[cursor];
+				if (!candidate || candidate.type !== "tool_start" || pairedStart.has(cursor)) continue;
+				const candidateName = toolName(candidate);
+				if (name && candidateName && candidateName !== name) continue;
+				pairedStart.add(cursor);
+				pairedEnd.add(index);
+				pairOf.set(cursor, index);
+				break;
+			}
+		});
+
 		const items: TimelineItem[] = [];
-		for (const event of visible) {
+		const emitted = new Set<number>();
+		visible.forEach((event) => {
 			if (event.type !== "tool_start" && event.type !== "tool_end") {
 				items.push({ kind: "event", key: event.id, event });
-				continue;
+				return;
 			}
-			const id = callId(event);
-			if (id && emitted.has(id)) continue;
-			if (id) emitted.add(id);
+			const callIndex = calls.indexOf(event);
 			if (event.type === "tool_start") {
-				items.push({ kind: "tool", key: `tool:${id || event.id}`, start: event, end: id ? ends.get(id) : undefined });
-			} else {
-				items.push({ kind: "tool", key: `tool:${id || event.id}`, end: event });
+				if (emitted.has(callIndex)) return;
+				emitted.add(callIndex);
+				const endIndex = pairOf.get(callIndex);
+				if (endIndex !== undefined) emitted.add(endIndex);
+				items.push({
+					kind: "tool",
+					key: `tool:${callId(event) || event.id}`,
+					start: event,
+					end: endIndex !== undefined ? calls[endIndex] : undefined,
+				});
+				return;
 			}
-		}
+			if (pairedEnd.has(callIndex) || emitted.has(callIndex)) return;
+			emitted.add(callIndex);
+			items.push({ kind: "tool", key: `tool:${callId(event) || event.id}`, end: event });
+		});
 		return items;
 	}, [visible]);
 
 	// Everything between two messages or lifecycle events is one work block.
 	const rows = useMemo<TimelineRow[]>(() => {
 		const out: TimelineRow[] = [];
-		let block: ToolItem[] = [];
+		let block: WorkEntry[] = [];
 		const flush = () => {
 			if (block.length === 0) return;
-			out.push({ kind: "tools", key: block[0]?.key ?? "tools", items: block });
+			out.push({ kind: "work", key: block[0]?.key ?? "work", items: block });
 			block = [];
 		};
 		for (const item of timeline) {
 			if (item.kind === "tool") {
 				block.push(item);
+				continue;
+			}
+			if (isThoughtOnly(item.event)) {
+				block.push({ kind: "thought", key: item.key, event: item.event });
 				continue;
 			}
 			flush();
@@ -620,6 +715,15 @@ export function ActivityFeed({
 	}, [timeline]);
 
 	const lastVisibleId = visible.length > 0 ? visible[visible.length - 1]?.id : "";
+	const taskText = selected?.task?.trim() ?? "";
+	const firstPrompt = visible.find((event) => event.type === "user_prompt");
+	const firstPromptText = firstPrompt ? pickText(firstPrompt, ["text", "prompt", "message"]).trim() : "";
+	// The spawn prompt already states the task, so the card only adds noise when
+	// it repeats it word for word.
+	const redundantTask =
+		taskText.length > 0 &&
+		firstPromptText.length > 0 &&
+		(firstPromptText.includes(taskText) || taskText.includes(firstPromptText));
 
 	useEffect(() => {
 		const element = scrollRef.current;
@@ -663,7 +767,7 @@ export function ActivityFeed({
 				class="feed-scroll min-h-0 flex-1 overflow-y-auto px-3 py-3"
 				data-testid="feed"
 			>
-				{selected?.isSubagent && (
+				{selected?.isSubagent && !redundantTask && (
 					<div class="sticky top-0 z-10 mb-3 rounded-box border border-base-300 border-l-4 border-l-secondary bg-base-200/95 p-3 backdrop-blur">
 						<div class="mb-1 text-micro uppercase tracking-wide opacity-85">task</div>
 						<div class="text-body">
@@ -685,7 +789,7 @@ export function ActivityFeed({
 				) : (
 					<div class="flex flex-col gap-2 pt-1 pb-4">
 						{rows.map((row) =>
-							row.kind === "tools" ? (
+							row.kind === "work" ? (
 								<WorkBlock key={row.key} items={row.items} expandAll={expandAll} />
 							) : (
 								<EventRow
@@ -710,7 +814,7 @@ export function ActivityFeed({
 			{!atBottom && visible.length > 0 && (
 				<button
 					type="button"
-					class="btn btn-primary btn-xs absolute bottom-4 left-1/2 -translate-x-1/2 shadow-lg"
+					class="btn btn-primary btn-xs absolute right-4 bottom-4 shadow-lg"
 					onClick={jumpToLatest}
 				>
 					▼ jump to latest

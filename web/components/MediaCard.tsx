@@ -33,7 +33,7 @@ export function MediaCard({ asset, onOpenImage }: MediaCardProps) {
 	}
 
 	return (
-		<figure class={`overflow-hidden rounded-box border border-base-300 bg-base-300/25 ${span}`}>
+		<figure class={`overflow-hidden rounded-box border border-base-300 bg-base-300/25 ${span} ${isVideo ? "" : "max-w-xl"}`}>
 			{isVideo ? (
 				<video
 					class="max-h-72 w-full bg-black"

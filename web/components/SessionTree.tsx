@@ -27,7 +27,8 @@ interface TreeNode {
 
 type StatusFilter = "all" | "live";
 
-const AGENT_COLORS = ["#8ab4ff", "#c39bff", "#6fd3a8", "#ffb86b", "#ff8fa3", "#7ad7e6"];
+// Cool hues only: warm dots read as "failed" next to the status icons.
+const AGENT_COLORS = ["#8ab4ff", "#a5a8ff", "#c39bff", "#7ad7e6", "#6fd3a8", "#9bd97a"];
 
 function agentColor(name: string): string {
 	let hash = 0;
@@ -211,7 +212,7 @@ function TreeRow({
 						{spawnActive && (
 							<span class="size-1 rounded-full bg-info" title="Started from the dashboard" aria-hidden="true" />
 						)}
-						<time class="w-14 shrink-0 text-right font-mono text-micro tabular-nums opacity-0 group-hover:opacity-80 group-focus-within:opacity-80">
+						<time class="w-14 shrink-0 whitespace-nowrap text-right font-mono text-caption tabular-nums opacity-45 group-hover:opacity-70">
 							{relativeTime(session.updatedAt || session.startedAt)}
 						</time>
 					</span>

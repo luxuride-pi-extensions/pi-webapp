@@ -106,8 +106,8 @@ export function PromptBar({ target, onSend, disabled = false, onTakeOver, taking
 			)}
 			<div class="rounded-box border border-base-300 bg-base-100 focus-within:border-primary/60">
 				<textarea
-					class="block w-full resize-none bg-transparent px-3 py-2 font-mono text-body leading-relaxed outline-none placeholder:opacity-85"
-					rows={2}
+					class="block max-h-40 min-h-[2.75rem] w-full resize-none bg-transparent px-3 py-2 font-mono text-body leading-relaxed outline-none placeholder:opacity-85"
+					rows={1}
 					value={text}
 					placeholder={`Message ${name}…`}
 					disabled={blocked || sending}

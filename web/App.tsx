@@ -80,6 +80,7 @@ interface TopBarProps {
 	onNewSession: () => void;
 	onRescan: () => void;
 	onToggleExpand: () => void;
+	onToggleNav?: () => void;
 }
 
 function TopBar({
@@ -94,11 +95,25 @@ function TopBar({
 	onNewSession,
 	onRescan,
 	onToggleExpand,
+	onToggleNav,
 }: TopBarProps) {
 	const live = status === "open";
 	const dirs = leech?.dirs ?? [];
 	return (
 		<header class="flex items-center gap-3 border-b border-base-300 bg-base-200/80 px-3 py-1.5">
+			{onToggleNav && (
+				<button
+					type="button"
+					class="btn btn-ghost btn-square btn-sm -ml-1 md:hidden"
+					onClick={onToggleNav}
+					aria-label="Show sessions"
+					data-testid="nav-toggle"
+				>
+					<svg class="size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+						<path d="M2 4h12M2 8h12M2 12h12" stroke-linecap="round" />
+					</svg>
+				</button>
+			)}
 			<span class="text-meta font-semibold tracking-tight">pi-webapp</span>
 			<span
 				class="flex items-center gap-1.5 text-meta opacity-80"
@@ -110,7 +125,9 @@ function TopBar({
 			<span class="hidden items-center gap-1.5 font-mono text-meta opacity-82 md:flex" aria-label="Dashboard totals">
 				<span>{sessions} sessions</span>
 				<span aria-hidden="true">·</span>
-				<span>{subagents} subagents</span>
+				<span>
+					{subagents} {subagents === 1 ? "subagent" : "subagents"}
+				</span>
 				<span aria-hidden="true">·</span>
 				<span>{events} events</span>
 				{leech && leech.sessions > 0 && (
@@ -345,11 +362,6 @@ function SessionHeader({
 						pid {session.ownerPid}
 					</span>
 				)}
-				{onSwitchModel !== undefined && session.source !== "leech" && models.length === 0 && (
-					<span class="hidden sm:inline" title="No pi instance reported its models yet">
-						no models reported
-					</span>
-				)}
 				<span class="ml-auto" title="Last activity">
 					updated {relativeTime(session.updatedAt)}
 				</span>
@@ -432,6 +444,7 @@ export function App() {
 	const [modelBusyId, setModelBusyId] = useState<string | null>(null);
 	const route = useRoute();
 	const selectedId = route.view === "session" ? route.sessionId : null;
+	const [navOpen, setNavOpen] = useState(false);
 	const [lightbox, setLightbox] = useState<MediaAsset | null>(null);
 	const [scanning, setScanning] = useState(false);
 	const [modalOpen, setModalOpen] = useState(false);
@@ -449,6 +462,7 @@ export function App() {
 
 	const selectSession = useCallback((id: string) => {
 		navigate({ view: "session", sessionId: id });
+		setNavOpen(false);
 	}, []);
 
 	const handleSwitchModel = useCallback(
@@ -670,9 +684,22 @@ export function App() {
 				onNewSession={openNewSession}
 				onRescan={handleRescan}
 				onToggleExpand={toggleExpand}
+				onToggleNav={() => setNavOpen((value) => !value)}
 			/>
-			<div class="flex min-h-0 flex-1">
-				<aside class="w-80 shrink-0 overflow-y-auto border-r border-base-300 bg-base-200">
+			<div class="relative flex min-h-0 flex-1">
+				{navOpen && (
+					<button
+						type="button"
+						class="absolute inset-0 z-20 bg-black/50 md:hidden"
+						onClick={() => setNavOpen(false)}
+						aria-label="Hide sessions"
+					/>
+				)}
+				<aside
+					class={`${
+						navOpen ? "absolute inset-y-0 left-0 z-30 flex w-72 shadow-2xl" : "hidden"
+					} shrink-0 flex-col overflow-y-auto border-r border-base-300 bg-base-200 md:relative md:z-auto md:flex md:w-80 md:shadow-none`}
+				>
 					<SessionTree
 						sessions={sessions}
 						selectedSessionId={selected?.id ?? null}

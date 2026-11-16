@@ -1176,7 +1176,10 @@ export class WebappServer {
 				const child = this.ensureSession(childId, source, timestamp);
 				const status = normalizeStatus(data.status, "completed");
 				child.status = status;
-				if (status !== "running") child.endedAt = timestamp;
+				if (status !== "running") {
+					child.endedAt = timestamp;
+					child.busy = false;
+				}
 				child.updatedAt = Math.max(child.updatedAt, timestamp);
 				touched.add(childId);
 
@@ -1231,8 +1234,8 @@ export class WebappServer {
 				}
 				// Only a prompt, tool call or assistant message means the agent is
 				// actually working; `work_state` can arrive after the turn ended.
-				if (event.type === "user_prompt" || event.type === "tool_start" || event.type === "assistant_message") {
-					node.busy = !terminalLive ? true : node.busy === true;
+				if (!terminalLive && (event.type === "user_prompt" || event.type === "tool_start" || event.type === "assistant_message")) {
+					node.busy = true;
 				}
 				node.updatedAt = Math.max(node.updatedAt, timestamp);
 				touched.add(sessionId);

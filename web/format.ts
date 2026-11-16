@@ -15,6 +15,8 @@ export function sessionName(session: SessionNode): string {
 	if (custom) return custom;
 	const agent = session.agentName?.trim();
 	if (agent && agent !== "session") return agent;
+	const title = session.title?.trim();
+	if (title && title !== session.id) return title;
 	const short = session.id.slice(0, 8);
 	if (session.isSubagent) return `subagent ${short}`;
 	const folder = session.cwd ? lastSegment(session.cwd) : lastSegment(session.title ?? "");
