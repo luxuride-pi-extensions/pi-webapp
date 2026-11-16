@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import type { MediaAsset, SessionNode, WebappEvent, WebappEventType } from "../../src/protocol.js";
 import { bool, mediaList, str } from "../../src/protocol.js";
+import { detectOutput, highlightTokens, type HighlightToken } from "../highlight.js";
 import { sessionName } from "../format";
 import { MarkdownText } from "./MarkdownText";
 import { MediaCard } from "./MediaCard";
@@ -227,22 +228,48 @@ function renderAssistant({ event, sessions, selectedId, expandAll }: RenderProps
 			{speaker && <div class="text-micro font-medium uppercase tracking-wide opacity-75">{speaker}</div>}
 			{text.trim().length > 0 && (
 				<div class="w-full text-body leading-[1.7]">
-					<ClampedMarkdown text={text} expandAll={expandAll} />
+					{bool(event.data.streaming) ? (
+						<>
+							<MarkdownText text={text} />
+							<span class="ml-1 font-mono text-caption text-primary/70" data-testid="streaming">
+								▍writing
+							</span>
+						</>
+					) : (
+						<ClampedMarkdown text={text} expandAll={expandAll} />
+					)}
 				</div>
 			)}
 			{reasoning && (
-				<details class="w-full" open={expandAll} data-testid="thinking">
-					<summary class="flex cursor-pointer list-none items-baseline gap-2 text-micro opacity-75 hover:opacity-80">
-						<span class="shrink-0 w-2 opacity-85" aria-hidden="true">▸</span>
-						<span class="shrink-0 uppercase tracking-wide">thinking</span>
-						<span class="line-clamp-1 min-w-0 flex-1 italic">{oneLine(reasoning, 140)}</span>
+				<details class="w-full rounded-md border border-secondary/25 bg-secondary/5" open={expandAll} data-testid="thinking">
+					<summary class="flex cursor-pointer list-none items-baseline gap-2 px-2 py-1">
+						<span class="shrink-0 font-mono text-caption uppercase tracking-wide text-secondary/80">reasoning</span>
+						<span class="line-clamp-1 min-w-0 flex-1 italic text-meta text-base-content/60">
+							{oneLine(reasoning, 140)}
+						</span>
 					</summary>
-					<div class="thinking mt-1 whitespace-pre-wrap border-l-2 border-base-300 pl-3 text-meta leading-relaxed opacity-85">
+					<div class="thinking whitespace-pre-wrap border-t border-secondary/20 px-2 py-1.5 text-meta italic leading-relaxed text-base-content/65">
 						{reasoning}
 					</div>
 				</details>
 			)}
 		</div>
+	);
+}
+
+function OutputTokens({ tokens }: { tokens: HighlightToken[] }) {
+	return (
+		<>
+			{tokens.map((token, index) =>
+				typeof token === "string" ? (
+					token
+				) : (
+					<span key={index} class={`hljs-${token.kind.split(" ")[0] ?? "text"}`}>
+						<OutputTokens tokens={token.children} />
+					</span>
+				),
+			)}
+		</>
 	);
 }
 
@@ -262,7 +289,9 @@ function ToolLine({ item, expandAll }: { item: ToolItem; expandAll: boolean }) {
 		output.length > 0 && !EMPTY_OUTPUT.test(flatOutput) && !request.startsWith(flatOutput.slice(0, 60));
 	const [open, setOpen] = useState(false);
 	const expanded = expandAll || open;
-	const lines = output.trim().length > 0 ? output.trim().split("\n").length : 0;
+	const shape = detectOutput(output, request);
+	const tokens = shape.language ? highlightTokens(shape.text, shape.language) : null;
+	const lines = shape.text.trim().length > 0 ? shape.text.trim().split("\n").length : 0;
 	return (
 		<div class="group flex min-w-0 flex-col" data-testid="tool-card" data-event-type="tool">
 			<div
@@ -306,12 +335,21 @@ function ToolLine({ item, expandAll }: { item: ToolItem; expandAll: boolean }) {
 			{usefulOutput && expanded && (
 				<div class="relative ml-[1.125rem] border-l border-dashed border-base-300 pl-3" data-testid="output-connector">
 					<span class="absolute -top-1 left-0 size-1.5 -translate-x-1/2 rounded-full bg-base-300" aria-hidden="true" />
-					<pre
-						class="my-1 max-h-80 overflow-y-auto whitespace-pre-wrap break-words rounded-md border border-l-0 border-base-300/70 bg-base-300/20 p-2 font-mono text-meta leading-relaxed text-base-content/70"
-						data-testid="tool-output"
-					>
-						{output}
-					</pre>
+					<div class="my-1 overflow-hidden rounded-md border border-l-0 border-base-300/70 bg-base-300/20">
+						<div class="flex items-center gap-2 border-b border-base-300/50 px-2 py-0.5 font-mono text-caption opacity-50">
+							<span>output</span>
+							<span class="rounded bg-base-300/60 px-1" data-testid="output-language">
+								{shape.label}
+							</span>
+							<span class="ml-auto tabular-nums">{lines} lines</span>
+						</div>
+						<pre
+							class="hljs-pre max-h-80 overflow-y-auto whitespace-pre-wrap break-words p-2 font-mono text-meta leading-relaxed text-base-content/75"
+							data-testid="tool-output"
+						>
+							{tokens ? <OutputTokens tokens={tokens} /> : shape.text}
+						</pre>
+					</div>
 				</div>
 			)}
 		</div>
@@ -361,17 +399,14 @@ function ThoughtLine({ event, expandAll }: { event: WebappEvent; expandAll: bool
 	const reasoning = pickString(event, ["reasoning", "thinking"]);
 	if (!reasoning.trim()) return null;
 	return (
-		<details class="group px-1 py-0.5" open={expandAll} data-testid="thinking">
-			<summary class="flex cursor-pointer list-none items-baseline gap-1.5 rounded-md py-0.5 hover:bg-base-200/40">
-				<span class="w-3 shrink-0 text-center font-mono text-caption text-secondary/60" aria-hidden="true">
-					·
-				</span>
-				<span class="shrink-0 font-mono text-caption uppercase tracking-wide text-secondary/70">thought</span>
-				<span class="min-w-0 flex-1 truncate italic text-meta text-base-content/50" title={oneLine(reasoning, 400)}>
+		<details class="group my-0.5 rounded-md border border-secondary/20 bg-secondary/5" open={expandAll} data-testid="thinking">
+			<summary class="flex cursor-pointer list-none items-baseline gap-2 px-2 py-1">
+				<span class="shrink-0 font-mono text-caption uppercase tracking-wide text-secondary/80">reasoning</span>
+				<span class="min-w-0 flex-1 truncate italic text-meta text-base-content/55" title={oneLine(reasoning, 400)}>
 					{oneLine(reasoning, 200)}
 				</span>
 			</summary>
-			<div class="my-1 ml-[1.125rem] border-l border-dashed border-secondary/30 pl-3 text-meta italic leading-relaxed text-base-content/60">
+			<div class="whitespace-pre-wrap border-t border-secondary/20 px-2 py-1.5 text-meta italic leading-relaxed text-base-content/65">
 				{reasoning}
 			</div>
 		</details>
@@ -509,6 +544,7 @@ function EventRow({
 			);
 			break;
 		case "assistant_message":
+		case "assistant_delta":
 			content = renderAssistant(renderProps);
 			break;
 		case "subagent_spawned":

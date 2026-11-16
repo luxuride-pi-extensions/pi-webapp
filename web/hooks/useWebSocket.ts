@@ -201,12 +201,23 @@ export function useWebSocket(): WebappConnection {
 
 	const appendEvent = useCallback((event: WebappEvent | null | undefined) => {
 		if (!event || typeof event.id !== "string" || event.id.length === 0) return;
-		if (seenIds.current.has(event.id)) return;
-		seenIds.current.add(event.id);
 		const normalized: WebappEvent = {
 			...event,
 			data: event.data && typeof event.data === "object" ? event.data : {},
 		};
+		// Streaming turns arrive repeatedly under one id: replace, don't append.
+		if (seenIds.current.has(event.id)) {
+			setState((previous) =>
+				previous
+					? {
+							...previous,
+							events: previous.events.map((item) => (item.id === event.id ? normalized : item)),
+						}
+					: previous,
+			);
+			return;
+		}
+		seenIds.current.add(event.id);
 		setState((previous) => {
 			if (!previous) return previous;
 			let events = [...previous.events, normalized];

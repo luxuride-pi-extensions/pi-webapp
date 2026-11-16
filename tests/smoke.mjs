@@ -666,7 +666,23 @@ try {
 		!afterRevive.sessions.some((session) => session.id === spawnSessionId),
 		"a removed session is not re-added by later events",
 	);
-	step("11. session rename");
+	step("11. streamed assistant turn");
+	const streamId = `${parentId}`;
+	await postEvent("local-1", makeEvent("assistant_delta", streamId, { data: { messageId: "msg-stream-1", text: "Half a thou", streaming: true } }));
+	await postEvent("local-1", makeEvent("assistant_delta", streamId, { data: { messageId: "msg-stream-1", text: "Half a thought", streaming: true } }));
+	const midStream = await (await fetch(`${baseUrl}/api/state`)).json();
+	const partials = midStream.events.filter((event) => event.data && event.data.messageId === "msg-stream-1");
+	assert.equal(partials.length, 1, "a streaming turn stays one event while it grows");
+	assert.equal(partials[0].data.text, "Half a thought", "the latest delta wins");
+	await postEvent("local-1", makeEvent("assistant_message", streamId, { data: { messageId: "msg-stream-1", text: "Half a thought, finished.", streaming: false } }));
+	const finished = await (await fetch(`${baseUrl}/api/state`)).json();
+	const finals = finished.events.filter((event) => event.data && event.data.messageId === "msg-stream-1");
+	assert.equal(finals.length, 1, "the final message replaces the streaming fragment");
+	assert.equal(finals[0].type, "assistant_message", "the replaced event is the finished message");
+	assert.equal(finals[0].data.text, "Half a thought, finished.", "the finished text is what the reader sees");
+	assert.equal(finals[0].data.streaming, false, "the finished message is no longer streaming");
+
+	step("12. session rename");
 	const renameResponse = await fetch(`${baseUrl}/api/sessions/${encodeURIComponent(parentId)}/rename`, {
 		method: "POST",
 		headers: { "content-type": "application/json" },
@@ -706,7 +722,7 @@ try {
 		undefined,
 		"clearing the name restores the agent label",
 	);
-	step("12. plugin registry");
+	step("13. plugin registry");
 	const pluginDir = path.join(tmpRoot, "plugin-todo");
 	await mkdir(pluginDir, { recursive: true });
 	await writeFile(
@@ -750,7 +766,7 @@ try {
 	const pluginAssetAfter = await fetch(`${baseUrl}/plugins/smoke-todo/panel.html`);
 	assert.equal(pluginAssetAfter.status, 404, "removed plugins stop being served");
 
-	step("13. model switching");
+	step("14. model switching");
 	const modelUrl = `${baseUrl}/api/sessions/${encodeURIComponent(parentId)}/model`;
 	const localSwitch = await fetch(modelUrl, {
 		method: "POST",
@@ -831,7 +847,7 @@ try {
 	console.error(error?.stack ?? String(error));
 } finally {
 	clearTimeout(watchdog);
-	step("14. cleanup");
+	step("15. cleanup");
 	try {
 		await cleanup();
 	} catch (error) {

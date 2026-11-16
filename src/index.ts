@@ -63,6 +63,27 @@ const ASSISTANT_TEXT_LIMIT = 8000;
 const THINKING_LIMIT = 2000;
 const TOOL_HINT_LIMIT = 200;
 const TOOL_SUMMARY_LIMIT = 1500;
+/** Streaming is on by default; the interval keeps the feed readable and cheap. */
+const STREAM_DEFAULT_MS = 150;
+const STREAM_MIN_MS = 40;
+
+interface LiveStream {
+	messageId: string;
+	text: string;
+	thinking: string;
+	flushedAt: number;
+}
+
+function streamInterval(): number {
+	const raw = Number(process.env[ENV.streamMs]);
+	if (!Number.isFinite(raw) || raw <= 0) return STREAM_DEFAULT_MS;
+	return Math.max(STREAM_MIN_MS, Math.round(raw));
+}
+
+function streamingEnabled(): boolean {
+	const raw = (process.env[ENV.stream] ?? "").trim().toLowerCase();
+	return !(raw === "0" || raw === "off" || raw === "false" || raw === "no");
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -231,6 +252,25 @@ export default function piWebapp(pi: ExtensionAPI): void {
 		} catch {
 			// the dashboard must never break a turn
 		}
+	}
+
+	let stream: LiveStream | null = null;
+
+	function messageIdOf(message: unknown, fallbackPrefix: string): string {
+		if (isRecord(message) && typeof message.id === "string" && message.id.trim()) return message.id.trim();
+		return `${fallbackPrefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+	}
+
+	/** Assistant turns only; reading through a record avoids the union narrowing. */
+	function assistantTurn(message: unknown): { id: string; content: unknown; model: string } | null {
+		if (!isRecord(message) || message.role !== "assistant") return null;
+		const provider = typeof message.provider === "string" ? message.provider : "";
+		const modelId = typeof message.model === "string" ? message.model : "";
+		return {
+			id: messageIdOf(message, "stream"),
+			content: message.content,
+			model: provider && modelId ? `${provider}/${modelId}` : "",
+		};
 	}
 
 	function currentEvent(
@@ -580,6 +620,49 @@ export default function piWebapp(pi: ExtensionAPI): void {
 		}
 	});
 
+	pi.on("message_start", (event) => {
+		try {
+			if (!streamingEnabled()) return;
+			const turn = assistantTurn(event.message);
+			if (!turn || !session) return;
+			stream = { messageId: turn.id, text: "", thinking: "", flushedAt: 0 };
+		} catch {
+			// streaming is best effort
+		}
+	});
+
+	pi.on("message_update", (event) => {
+		try {
+			if (!streamingEnabled()) return;
+			const turn = assistantTurn(event.message);
+			if (!turn || !session) return;
+			const text = extractText(turn.content, ASSISTANT_TEXT_LIMIT);
+			const thinking = extractThinking(turn.content, THINKING_LIMIT);
+			if (!text && !thinking) return;
+			const now = Date.now();
+			const current: LiveStream =
+				stream && stream.messageId === turn.id
+					? stream
+					: { messageId: turn.id, text: "", thinking: "", flushedAt: 0 };
+			stream = current;
+			if (text === current.text && thinking === current.thinking) return;
+			if (now - current.flushedAt < streamInterval()) return;
+			current.text = text;
+			current.thinking = thinking;
+			current.flushedAt = now;
+			const delta = currentEvent("assistant_delta", {
+				messageId: current.messageId,
+				text,
+				thinking,
+				model: turn.model,
+				streaming: true,
+			});
+			if (delta) emit(delta);
+		} catch {
+			// streaming is best effort
+		}
+	});
+
 	pi.on("message_end", (event) => {
 		try {
 			const active = session;
@@ -599,12 +682,16 @@ export default function piWebapp(pi: ExtensionAPI): void {
 				const text = extractText(message.content, ASSISTANT_TEXT_LIMIT);
 				const thinking = extractThinking(message.content, THINKING_LIMIT);
 				if (!text && !thinking) return;
+				const messageId = stream?.messageId ?? messageIdOf(message, "msg");
 				const assistantEvent = currentEvent("assistant_message", {
+					messageId,
 					text,
 					thinking,
 					model: `${message.provider}/${message.model}`,
+					streaming: false,
 				});
 				if (assistantEvent) emit(assistantEvent);
+				stream = null;
 			}
 		} catch {
 			// message forwarding is best effort

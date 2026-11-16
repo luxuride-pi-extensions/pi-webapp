@@ -18,6 +18,8 @@ export const ENV = {
     leechDir: "PI_WEBAPP_LEECH_DIR",
     leechMaxAge: "PI_WEBAPP_LEECH_MAX_AGE_MS",
     playwright: "PI_WEBAPP_PLAYWRIGHT",
+    stream: "PI_WEBAPP_STREAM",
+    streamMs: "PI_WEBAPP_STREAM_MS",
     /** Set to 0 to forbid the dashboard from launching pi processes. */
     spawn: "PI_WEBAPP_SPAWN",
     /** Overrides the `pi` executable used for dashboard-spawned sessions. */

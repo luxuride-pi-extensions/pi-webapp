@@ -86,6 +86,7 @@ const EVENT_TYPES: ReadonlySet<string> = new Set<WebappEventType>([
 	"agent_end",
 	"user_prompt",
 	"assistant_message",
+	"assistant_delta",
 	"tool_start",
 	"tool_end",
 	"subagent_spawned",
@@ -638,7 +639,11 @@ export class WebappServer {
 			}
 		}
 
-		this.events.push(normalized);
+		// A streamed turn stays one row: each delta updates the previous fragment and
+		// the final message replaces it in place, so history never fills with
+		// partial copies of the same answer.
+		const replaced = this.replaceStreamFragment(normalized);
+		if (!replaced) this.events.push(normalized);
 		if (this.events.length > EVENT_HISTORY_LIMIT) {
 			this.events.splice(0, this.events.length - EVENT_HISTORY_LIMIT);
 		}
@@ -648,6 +653,30 @@ export class WebappServer {
 			if (session) this.broadcast({ type: "session", session: { ...session } });
 		}
 		this.broadcast({ type: "event", event: normalized });
+	}
+
+	/**
+	 * Keeps one event per assistant message: deltas mutate the fragment already in
+	 * the log, and the final message turns that fragment into the finished event.
+	 */
+	private replaceStreamFragment(event: WebappEvent): boolean {
+		if (event.type !== "assistant_delta" && event.type !== "assistant_message") return false;
+		const messageId = str(event.data.messageId);
+		if (!messageId) return false;
+		const index = this.events.findIndex(
+			(candidate) =>
+				(candidate.type === "assistant_delta" || candidate.type === "assistant_message") &&
+				candidate.sessionId === event.sessionId &&
+				str(candidate.data.messageId) === messageId,
+		);
+		if (index < 0) return false;
+		const previous = this.events[index];
+		if (!previous) return false;
+		previous.type = event.type;
+		previous.data = event.data;
+		previous.timestamp = event.timestamp;
+		event.id = previous.id;
+		return true;
 	}
 
 	setLocalPromptHandler(handler: LocalPromptHandler | null): void {
@@ -1220,6 +1249,7 @@ export class WebappServer {
 			}
 			case "user_prompt":
 			case "assistant_message":
+			case "assistant_delta":
 			case "tool_start":
 			case "tool_end":
 			case "work_state":
@@ -1234,7 +1264,13 @@ export class WebappServer {
 				}
 				// Only a prompt, tool call or assistant message means the agent is
 				// actually working; `work_state` can arrive after the turn ended.
-				if (!terminalLive && (event.type === "user_prompt" || event.type === "tool_start" || event.type === "assistant_message")) {
+				if (
+					!terminalLive &&
+					(event.type === "user_prompt" ||
+						event.type === "tool_start" ||
+						event.type === "assistant_message" ||
+						event.type === "assistant_delta")
+				) {
 					node.busy = true;
 				}
 				node.updatedAt = Math.max(node.updatedAt, timestamp);

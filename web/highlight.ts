@@ -110,3 +110,104 @@ export function highlightTokens(code: string, language: string): HighlightToken[
 		return [code];
 	}
 }
+
+/** ANSI styling a CLI wrote into its output; the browser should not show escapes. */
+const ANSI_PATTERN = /\u001b\[[0-9;?]*[A-Za-z]/g;
+
+export function stripAnsi(text: string): string {
+	return text.replace(ANSI_PATTERN, "");
+}
+
+export interface OutputShape {
+	/** Text with terminal escapes removed. */
+	text: string;
+	/** Language to highlight with, or null when the output is plain prose. */
+	language: string | null;
+	/** Short badge for the output header ("diff", "json", "text", …). */
+	label: string;
+}
+
+const EXTENSION_ALIASES: Record<string, string> = {
+	ts: "typescript",
+	tsx: "typescript",
+	mts: "typescript",
+	js: "javascript",
+	mjs: "javascript",
+	cjs: "javascript",
+	jsx: "javascript",
+	json: "json",
+	py: "python",
+	rs: "rust",
+	go: "go",
+	yml: "yaml",
+	yaml: "yaml",
+	sql: "sql",
+	sh: "bash",
+	bash: "bash",
+	zsh: "bash",
+	css: "css",
+	html: "xml",
+	xml: "xml",
+	svg: "xml",
+	md: "markdown",
+	diff: "diff",
+	patch: "diff",
+};
+
+function languageFromHint(hint: string): string | null {
+	const matches = hint.match(/[\w/.-]+\.[a-z0-9]{1,5}\b/gi);
+	if (!matches) return null;
+	for (const match of matches.reverse()) {
+		const extension = match.slice(match.lastIndexOf(".") + 1).toLowerCase();
+		const language = EXTENSION_ALIASES[extension];
+		if (language) return language;
+	}
+	return null;
+}
+
+/**
+ * Guess what a tool wrote, so output is highlighted by content rather than by
+ * whichever tool produced it. The command is only a hint: `git diff` and
+ * `npx playwright test` both print very different shapes.
+ */
+export function detectOutput(raw: string, hint = ""): OutputShape {
+	const text = stripAnsi(raw);
+	const trimmed = text.trim();
+	if (!trimmed) return { text, language: null, label: "text" };
+
+	if (/^(diff --git |index [0-9a-f]+\.\.|--- a\/|\+\+\+ b\/|@@ )/m.test(trimmed) || /\n@@ [^\n]*@@/.test(trimmed)) {
+		return { text, language: "diff", label: "diff" };
+	}
+	if ((trimmed.startsWith("{") || trimmed.startsWith("[")) && trimmed.length > 1) {
+		try {
+			JSON.parse(trimmed);
+			return { text, language: "json", label: "json" };
+		} catch {
+			// not JSON, keep looking
+		}
+	}
+	if (/^(<\?xml|<!DOCTYPE|<[a-z][\w-]*(?:[\s>]|$))/i.test(trimmed) && /<\/[a-z]/i.test(trimmed)) {
+		return { text, language: "xml", label: "xml" };
+	}
+	if (/Traceback \(most recent call last\)/.test(trimmed)) return { text, language: "python", label: "python" };
+	if (/(^|\n)\s+at\s+[\w$.<>]+\s*\([^)]*:\d+:\d+\)/.test(trimmed) || /(^|\n)\s+at\s+[\w$.<>]+:\d+:\d+/.test(trimmed)) {
+		return { text, language: "javascript", label: "stack" };
+	}
+	const lines = trimmed.split("\n");
+	if (lines.length > 2) {
+		const yamlish = lines.filter((line) => /^[\w.-]+:\s+\S/.test(line)).length;
+		if (yamlish >= Math.max(2, Math.ceil(lines.length * 0.6))) return { text, language: "yaml", label: "yaml" };
+	}
+	// Test-runner and CLI logs talk about code without being code.
+	if (/(^|\n)\s*(Error|FAIL|error):?\s/.test(trimmed) && !/^\s*[}{[]/m.test(trimmed)) {
+		return { text, language: null, label: "log" };
+	}
+	const fromHint = languageFromHint(hint);
+	if (fromHint === "diff") return { text, language: "diff", label: "diff" };
+	if (fromHint && lines.length > 2) return { text, language: fromHint, label: fromHint };
+	if (lines.length > 1 && lines.every((line) => line.startsWith("$ ") || line.startsWith("> "))) {
+		return { text, language: "bash", label: "shell" };
+	}
+	if (fromHint) return { text, language: fromHint, label: fromHint };
+	return { text, language: null, label: "text" };
+}
