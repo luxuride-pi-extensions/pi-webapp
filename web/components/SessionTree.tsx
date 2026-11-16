@@ -176,7 +176,7 @@ function TreeRow({
 					aria-current={selected ? "true" : undefined}
 				>
 					<span class="size-1.5 shrink-0 rounded-full" style={{ backgroundColor: agentColor(name) }} aria-hidden="true" />
-					<span class={`truncate text-meta ${session.isSubagent ? "font-normal" : "font-medium"}`}>{name}</span>
+					<span class={`truncate text-sidebar ${session.isSubagent ? "font-normal" : "font-medium"}`}>{name}</span>
 					{suffix && <span class="shrink-0 font-mono text-caption opacity-60">{suffix}</span>}
 					{session.busy === true ? (
 						<span
