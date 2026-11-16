@@ -72,12 +72,6 @@ const SYSTEM_LABELS: Partial<Record<WebappEventType, string>> = {
 	agent_end: "agent ended",
 };
 
-function clock(timestamp: number): string {
-	const date = new Date(timestamp);
-	return Number.isNaN(date.getTime())
-		? ""
-		: date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-}
 
 function fieldText(value: unknown): string {
 	if (typeof value === "string") return value;
@@ -176,7 +170,7 @@ function OpenSessionButton({ id, name, onSelectSession }: { id: string; name: st
 	return (
 		<button
 			type="button"
-			class="btn btn-ghost btn-xs mt-1 self-start px-0 text-primary"
+			class="btn btn-ghost btn-xs h-auto min-h-0 px-1 py-0 font-normal text-primary opacity-85 hover:opacity-100"
 			onClick={() => onSelectSession(id)}
 		>
 			Open {name} session →
@@ -233,17 +227,6 @@ function oneLine(text: string, limit = 200): string {
 	return flat.length > limit ? `${flat.slice(0, limit - 1)}…` : flat;
 }
 
-function HoverClock({ timestamp, class: className = "" }: { timestamp: number; class?: string }) {
-	return (
-		<time
-			class={`pointer-events-none font-mono text-micro tabular-nums opacity-0 group-hover:opacity-82 ${className}`}
-			title={new Date(timestamp).toLocaleString()}
-		>
-			{clock(timestamp)}
-		</time>
-	);
-}
-
 function renderAssistant({ event, sessions, selectedId, expandAll }: RenderProps) {
 	const text = pickText(event, ["text", "message", "content"]);
 	const reasoning = pickString(event, ["reasoning", "thinking"]);
@@ -271,7 +254,6 @@ function renderAssistant({ event, sessions, selectedId, expandAll }: RenderProps
 					</div>
 				</details>
 			)}
-			<HoverClock timestamp={event.timestamp} />
 		</div>
 	);
 }
@@ -287,7 +269,6 @@ function ToolLine({ item, expandAll }: { item: ToolItem; expandAll: boolean }) {
 	const request = requestSource ? oneLine(pickText(requestSource, ["summary", "input", "args", "command"]), 400) : "";
 	const output = end ? pickText(end, ["summary", "result", "output", "detail", "error"]) : "";
 	const ok = end ? succeeded(end) : undefined;
-	const duration = end ? formatDuration(durationMs(end)) : "";
 	const flatOutput = output.replace(/\s+/g, " ").trim();
 	const usefulOutput =
 		output.length > 0 && !EMPTY_OUTPUT.test(flatOutput) && !request.startsWith(flatOutput.slice(0, 60));
@@ -314,7 +295,6 @@ function ToolLine({ item, expandAll }: { item: ToolItem; expandAll: boolean }) {
 				<span class="min-w-0 flex-1 truncate font-mono text-meta leading-snug opacity-80" title={request || undefined}>
 					{request}
 				</span>
-				{duration && <span class="shrink-0 font-mono text-micro tabular-nums opacity-75">{duration}</span>}
 				{usefulOutput && (
 					<button
 						type="button"
@@ -326,7 +306,6 @@ function ToolLine({ item, expandAll }: { item: ToolItem; expandAll: boolean }) {
 						output <span aria-hidden="true">{expanded ? "▴" : "▾"}</span>
 					</button>
 				)}
-				<HoverClock timestamp={event.timestamp} />
 			</div>
 			{usefulOutput && expanded && (
 				<pre
@@ -346,9 +325,9 @@ function WorkBlock({ items, expandAll }: { items: WorkEntry[]; expandAll: boolea
 	const tools = items.filter((item): item is ToolItem => item.kind === "tool");
 	const running = tools.some((item) => !item.end);
 	const failures = tools.filter((item) => item.end && !succeeded(item.end)).length;
-	const total = tools.reduce((sum, item) => sum + durationMs(item.end ?? item.start!), 0);
 	return (
 		<div class="group/block my-0.5" data-testid="work-block">
+			{tools.length > 1 && (
 			<button
 				type="button"
 				class="flex w-full items-center gap-2 rounded px-1 py-0.5 text-left text-micro uppercase tracking-wide opacity-85 hover:opacity-90"
@@ -359,10 +338,10 @@ function WorkBlock({ items, expandAll }: { items: WorkEntry[]; expandAll: boolea
 				<span>
 					{tools.length} {tools.length === 1 ? "step" : "steps"}
 				</span>
-				{total > 0 && <span class="font-mono normal-case opacity-80">{formatDuration(total)}</span>}
 				{failures > 0 && <span class="text-error normal-case">{failures} failed</span>}
 				{running && <span class="text-info normal-case">running…</span>}
 			</button>
+			)}
 			{open && (
 				<div class="mt-0.5 flex flex-col gap-0.5 border-l border-base-300/70 pl-2">
 					{items.map((item) =>
@@ -391,7 +370,6 @@ function ThoughtLine({ event, expandAll }: { event: WebappEvent; expandAll: bool
 				<span class="min-w-0 flex-1 truncate italic opacity-75" title={oneLine(reasoning, 400)}>
 					{oneLine(reasoning, 220)}
 				</span>
-				<HoverClock timestamp={event.timestamp} />
 			</summary>
 			<div class="thinking mt-1 ml-5 whitespace-pre-wrap border-l-2 border-base-300 pl-2 text-meta leading-relaxed opacity-85">
 				{reasoning}
@@ -405,17 +383,15 @@ function renderSubagentSpawned({ event, sessions, onSelectSession }: RenderProps
 	const task = pickText(event, ["task", "prompt", "description"]);
 	const childId = resolveChildId(event, sessions);
 	return (
-		<div class="group rounded-md border-l-2 border-secondary/60 bg-secondary/5 py-1.5 pl-2.5 pr-2">
-			<div class="flex min-w-0 items-center gap-2 text-meta">
-				<span class="size-1.5 shrink-0 rounded-full bg-secondary" aria-hidden="true" />
-				<span class="shrink-0 font-medium">{agent}</span>
-				<span class="shrink-0 opacity-82">started</span>
-				<span class="ml-auto flex shrink-0 items-center gap-2">
-					<HoverClock timestamp={event.timestamp} />
+		<div class="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5 border-l-2 border-secondary/50 pl-2.5 py-1">
+			<span class="shrink-0 text-meta font-medium">{agent}</span>
+			<span class="shrink-0 text-meta opacity-70">started</span>
+			{task && <span class="min-w-0 flex-1 truncate text-meta opacity-70" title={task}>{oneLine(task, 120)}</span>}
+			{childId && (
+				<span class="ml-auto shrink-0">
+					<OpenSessionButton id={childId} name={agent} onSelectSession={onSelectSession} />
 				</span>
-			</div>
-			{task && <p class="mt-0.5 line-clamp-2 whitespace-pre-wrap text-meta leading-snug opacity-75">{task}</p>}
-			{childId && <OpenSessionButton id={childId} name={agent} onSelectSession={onSelectSession} />}
+			)}
 		</div>
 	);
 }
@@ -424,25 +400,21 @@ function renderSubagentCompleted({ event, sessions, onSelectSession }: RenderPro
 	const agent = pickString(event, ["agentName", "agent", "subagentName"]) || event.agentName || "subagent";
 	const summary = pickText(event, ["summary", "result", "error"]);
 	const ok = succeeded(event);
-	const duration = formatDuration(durationMs(event));
 	const childId = resolveChildId(event, sessions);
 	return (
 		<div
-			class={`group rounded-md border-l-2 py-1.5 pl-2.5 pr-2 ${
-				ok ? "border-success/60 bg-success/5" : "border-error/70 bg-error/5"
+			class={`flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5 border-l-2 pl-2.5 py-1 ${
+				ok ? "border-success/50" : "border-error/60"
 			}`}
 		>
-			<div class="flex min-w-0 items-center gap-2 text-meta">
-				<span class={`size-1.5 shrink-0 rounded-full ${ok ? "bg-success" : "bg-error"}`} aria-hidden="true" />
-				<span class="shrink-0 font-medium">{agent}</span>
-				<span class="shrink-0 opacity-82">{ok ? "finished" : "failed"}</span>
-				{duration && <span class="shrink-0 font-mono text-micro opacity-80">{duration}</span>}
-				<span class="ml-auto flex shrink-0 items-center gap-2">
-					<HoverClock timestamp={event.timestamp} />
+			<span class="shrink-0 text-meta font-medium">{agent}</span>
+			<span class={`shrink-0 text-meta ${ok ? "opacity-70" : "text-error"}`}>{ok ? "finished" : "failed"}</span>
+			{summary && <span class="min-w-0 flex-1 truncate text-meta opacity-70" title={summary}>{oneLine(summary, 120)}</span>}
+			{childId && (
+				<span class="ml-auto shrink-0">
+					<OpenSessionButton id={childId} name={agent} onSelectSession={onSelectSession} />
 				</span>
-			</div>
-			{summary && <p class="mt-0.5 line-clamp-3 whitespace-pre-wrap text-meta leading-snug opacity-75">{summary}</p>}
-			{childId && <OpenSessionButton id={childId} name={agent} onSelectSession={onSelectSession} />}
+			)}
 		</div>
 	);
 }
@@ -463,7 +435,7 @@ function renderWorkState({ event, showSubagent, sessions, onSelectSession, onOpe
 					<SubagentTag event={event} sessions={sessions} onSelectSession={onSelectSession} />
 				)}
 				<span class="text-body font-semibold">{title}</span>
-				<time class="ml-auto font-mono text-micro opacity-82">{clock(event.timestamp)}</time>
+
 			</div>
 			{body && (
 				<div class="mt-1 text-body">
@@ -533,7 +505,6 @@ function EventRow({
 					<div class="max-w-[min(42rem,88%)] whitespace-pre-wrap rounded-lg rounded-tr-sm border border-primary/40 bg-primary/15 px-3 py-2 text-body leading-[1.7]">
 						{pickText(event, ["text", "prompt", "message"])}
 					</div>
-					<HoverClock timestamp={event.timestamp} />
 				</div>
 			);
 			break;
@@ -567,7 +538,6 @@ function EventRow({
 					<div class="rounded-box border border-base-300 bg-base-200/40 p-2 font-mono text-meta">
 						<div class="flex items-center gap-2">
 							<span class="badge badge-ghost badge-xs">{event.type}</span>
-							<time class="ml-auto text-micro opacity-82">{clock(event.timestamp)}</time>
 						</div>
 						<pre class="mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap opacity-80">
 							{fieldText(event.data)}
@@ -613,7 +583,13 @@ export function ActivityFeed({
 						(event.parentSessionId === selected.id && CHILD_FEED_TYPES.has(event.type)),
 				);
 		return rows
-			.filter((event) => event.type !== "session_started")
+			.filter(
+				(event) =>
+					event.type !== "session_started" &&
+					event.type !== "agent_start" &&
+					event.type !== "agent_end" &&
+					event.type !== "session_meta",
+			)
 			.slice()
 			.sort((a, b) => a.timestamp - b.timestamp || a.id.localeCompare(b.id));
 	}, [events, selected]);

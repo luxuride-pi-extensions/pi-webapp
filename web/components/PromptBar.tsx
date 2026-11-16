@@ -106,7 +106,7 @@ export function PromptBar({ target, onSend, disabled = false, onTakeOver, taking
 			)}
 			<div class="rounded-box border border-base-300 bg-base-100 focus-within:border-primary/60">
 				<textarea
-					class="block max-h-40 min-h-[2.75rem] w-full resize-none bg-transparent px-3 py-2 font-mono text-body leading-relaxed outline-none placeholder:opacity-85"
+					class="block max-h-40 min-h-[2.5rem] w-full resize-none bg-transparent px-3 py-1.5 font-mono text-body leading-relaxed outline-none placeholder:opacity-85"
 					rows={1}
 					value={text}
 					placeholder={`Message ${name}…`}
@@ -121,7 +121,7 @@ export function PromptBar({ target, onSend, disabled = false, onTakeOver, taking
 						}
 					}}
 				/>
-				<div class="flex items-center gap-2 border-t border-base-300/60 px-2 py-1.5">
+				<div class="flex items-center gap-2 border-t border-base-300/60 px-2 py-1">
 					<select
 						class="select select-xs w-auto border-base-300 font-mono text-micro"
 						value={deliverAs}
@@ -136,7 +136,6 @@ export function PromptBar({ target, onSend, disabled = false, onTakeOver, taking
 							</option>
 						))}
 					</select>
-					<span class="hidden text-micro opacity-85 sm:inline">⏎ send · ⇧⏎ newline</span>
 					<button
 						type="button"
 						class="btn btn-primary btn-sm ml-auto gap-1.5 whitespace-nowrap px-3"

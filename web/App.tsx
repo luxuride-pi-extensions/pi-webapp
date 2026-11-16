@@ -14,13 +14,11 @@ import { LightboxModal } from "./components/LightboxModal";
 import { NewSessionModal } from "./components/NewSessionModal";
 import { PromptBar } from "./components/PromptBar";
 import { SessionTree } from "./components/SessionTree";
-import { SubagentRail } from "./components/SubagentRail";
 import { ActivityBadge, StatusBadge } from "./components/StatusBadge";
 import { useWebSocket } from "./hooks/useWebSocket";
 import { sessionDescription, sessionName } from "./format";
 import { navigate, useRoute } from "./router";
 
-const REPO_URL = "https://github.com/luxuride-pi-extensions/pi-webapp";
 const SPAWN_DISABLED_HINT =
 	"This dashboard cannot start sessions — run the standalone daemon on loopback, or the primary pi instance";
 
@@ -72,35 +70,15 @@ interface TopBarProps {
 	status: "connecting" | "open" | "closed";
 	sessions: number;
 	subagents: number;
-	events: number;
-	leech: LeechStatus | null;
-	scanning: boolean;
 	spawnEnabled: boolean;
-	expandAll: boolean;
 	onNewSession: () => void;
-	onRescan: () => void;
-	onToggleExpand: () => void;
 	onToggleNav?: () => void;
 }
 
-function TopBar({
-	status,
-	sessions,
-	subagents,
-	events,
-	leech,
-	scanning,
-	spawnEnabled,
-	expandAll,
-	onNewSession,
-	onRescan,
-	onToggleExpand,
-	onToggleNav,
-}: TopBarProps) {
+function TopBar({ status, sessions, subagents, spawnEnabled, onNewSession, onToggleNav }: TopBarProps) {
 	const live = status === "open";
-	const dirs = leech?.dirs ?? [];
 	return (
-		<header class="flex items-center gap-3 border-b border-base-300 bg-base-200/80 px-3 py-1.5">
+		<header class="flex items-center gap-2 border-b border-base-300 bg-base-200/80 px-3 py-1.5">
 			{onToggleNav && (
 				<button
 					type="button"
@@ -116,81 +94,17 @@ function TopBar({
 			)}
 			<span class="text-meta font-semibold tracking-tight">pi-webapp</span>
 			<span
-				class="flex items-center gap-1.5 text-meta opacity-80"
+				class="flex items-center gap-1.5 text-caption opacity-70"
 				title={live ? "WebSocket connected" : "Reconnecting to the dashboard server"}
 			>
 				<span class={`size-1.5 rounded-full ${live ? "bg-success" : "bg-warning"}`} aria-hidden="true" />
 				{live ? "live" : status === "connecting" ? "connecting" : "reconnecting"}
 			</span>
-			<span class="hidden items-center gap-1.5 font-mono text-meta opacity-82 md:flex" aria-label="Dashboard totals">
-				<span>{sessions} sessions</span>
-				<span aria-hidden="true">·</span>
-				<span>
-					{subagents} {subagents === 1 ? "subagent" : "subagents"}
-				</span>
-				<span aria-hidden="true">·</span>
-				<span>{events} events</span>
-				{leech && leech.sessions > 0 && (
-					<span
-						class="cursor-help"
-						title={`${leech.sessions} leeched session file(s)\n${dirs.length > 0 ? dirs.join("\n") : "No leech directories configured"}`}
-					>
-						· {leech.sessions} leeched
-					</span>
-				)}
+			<span class="hidden font-mono text-caption opacity-55 sm:inline" aria-label="Dashboard totals">
+				{sessions} {sessions === 1 ? "session" : "sessions"}
+				{subagents > 0 && ` · ${subagents} ${subagents === 1 ? "subagent" : "subagents"}`}
 			</span>
-			<div class="ml-auto flex shrink-0 items-center gap-2 pr-1">
-				<span class="join shrink-0 rounded-lg border border-base-300/70 bg-base-200/40">
-					<button
-						type="button"
-						class={`btn btn-square btn-sm join-item w-9 ${expandAll ? "btn-secondary" : "btn-ghost text-body-content/70"}`}
-						onClick={onToggleExpand}
-						aria-pressed={expandAll}
-						aria-label={expandAll ? "Collapse everything" : "Expand all sessions, subagents and messages"}
-						title={
-							expandAll
-								? "Expanded: subagents, thinking and tool output are open"
-								: "Expand every session, subagent, thinking block and tool output"
-						}
-						data-testid="expand-all"
-					>
-						<svg class="size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
-							{expandAll ? (
-								<path d="M6 3v10M3 6l3-3 3 3M10 13V3m3 7-3 3-3-3" stroke-linecap="round" stroke-linejoin="round" />
-							) : (
-								<path d="M6 10 3 13M10 6l3-3M3 10v3h3M13 6V3h-3" stroke-linecap="round" stroke-linejoin="round" />
-							)}
-						</svg>
-					</button>
-					<button
-						type="button"
-						class="btn btn-square btn-ghost btn-sm join-item"
-						onClick={onRescan}
-						disabled={scanning}
-						aria-label="Rescan session files"
-						title="Rescan session files for leeched sessions"
-					>
-						{scanning ? (
-							<span class="loading loading-spinner loading-xs" />
-						) : (
-							<svg class="size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
-								<path d="M13 8a5 5 0 1 1-1.6-3.7M13 2.5V5h-2.5" stroke-linecap="round" stroke-linejoin="round" />
-							</svg>
-						)}
-					</button>
-					<a
-						class="btn btn-square btn-ghost btn-sm join-item"
-						href={REPO_URL}
-						target="_blank"
-						rel="noreferrer"
-						aria-label="Open the pi-webapp repository"
-						title="github.com/luxuride-pi-extensions/pi-webapp"
-					>
-						<svg class="size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-							<path d="M6 3H3v10h10v-3M9 3h4v4M13 3 7.5 8.5" stroke-linecap="round" stroke-linejoin="round" />
-						</svg>
-					</a>
-				</span>
+			<div class="ml-auto flex shrink-0 items-center gap-2">
 				<button
 					type="button"
 					class="btn btn-primary btn-sm gap-1"
@@ -240,7 +154,10 @@ function SessionHeader({
 			<div class="flex min-w-0 items-center gap-2">
 				<StatusBadge status={session.status} source={session.source} size="xs" />
 				<ActivityBadge session={session} />
-				<h1 class="min-w-0 truncate text-body font-semibold leading-tight" title={session.id}>
+				<h1
+					class="min-w-0 truncate text-body font-semibold leading-tight"
+					title={`${session.id}\nstarted ${new Date(session.startedAt).toLocaleString()}\nupdated ${new Date(session.updatedAt).toLocaleString()}`}
+				>
 					{name}
 				</h1>
 				{subtitle && <span class="hidden min-w-0 truncate text-meta opacity-82 lg:inline">— {subtitle}</span>}
@@ -261,12 +178,12 @@ function SessionHeader({
 					{(onRename || onRemove) && (
 						<details class="dropdown dropdown-end">
 							<summary
-								class="btn btn-square btn-ghost btn-xs list-none"
+								class="btn btn-ghost btn-xs list-none gap-1 px-1.5 text-caption font-normal"
 								aria-label="Session actions"
-								title="Session actions"
+								title="Rename or remove this session"
 								data-testid="session-actions"
 							>
-								<span aria-hidden="true">⋯</span>
+								actions <span aria-hidden="true">▾</span>
 							</summary>
 							<ul class="menu dropdown-content z-30 mt-1 w-48 rounded-box border border-base-300 bg-base-100 p-1 text-meta shadow">
 								{canTakeOver && (
@@ -347,9 +264,6 @@ function SessionHeader({
 				) : (
 					currentModel && <span class="truncate">{currentModel}</span>
 				)}
-				<span title={session.startedAt ? new Date(session.startedAt).toLocaleString() : undefined}>
-					started {session.startedAt ? relativeTime(session.startedAt) : "—"}
-				</span>
 				{session.ownerPid !== undefined && (
 					<span
 						class={session.ownerBusy ? "text-warning" : ""}
@@ -676,14 +590,8 @@ export function App() {
 				status={status}
 				sessions={counts.sessions}
 				subagents={counts.subagents}
-				events={counts.events}
-				leech={leech}
-				scanning={scanning}
 				spawnEnabled={spawnEnabled}
-				expandAll={expandAll}
 				onNewSession={openNewSession}
-				onRescan={handleRescan}
-				onToggleExpand={toggleExpand}
 				onToggleNav={() => setNavOpen((value) => !value)}
 			/>
 			<div class="relative flex min-h-0 flex-1">
@@ -698,8 +606,34 @@ export function App() {
 				<aside
 					class={`${
 						navOpen ? "absolute inset-y-0 left-0 z-30 flex w-72 shadow-2xl" : "hidden"
-					} shrink-0 flex-col overflow-y-auto border-r border-base-300 bg-base-200 md:relative md:z-auto md:flex md:w-80 md:shadow-none`}
+					} shrink-0 flex-col overflow-hidden border-r border-base-300 bg-base-200 md:relative md:z-auto md:flex md:w-80 md:shadow-none`}
 				>
+					<div class="flex shrink-0 items-center gap-1 border-b border-base-300 px-2 py-1">
+						<span class="text-caption uppercase tracking-wide opacity-50">Sessions</span>
+						<span class="ml-auto flex items-center gap-1">
+							<button
+								type="button"
+								class="btn btn-ghost btn-xs px-1.5 text-caption font-normal"
+								onClick={toggleExpand}
+								aria-pressed={expandAll}
+								aria-label={expandAll ? "Collapse everything" : "Expand all sessions, subagents and messages"}
+								title={expandAll ? "Collapse subagents, thinking and tool output" : "Expand subagents, thinking and tool output"}
+								data-testid="expand-all"
+							>
+								{expandAll ? "collapse" : "expand"}
+							</button>
+							<button
+								type="button"
+								class="btn btn-ghost btn-xs px-1.5 text-caption font-normal"
+								onClick={handleRescan}
+								disabled={scanning}
+								title="Rescan session files on disk"
+							>
+								{scanning ? <span class="loading loading-spinner loading-xs" /> : "rescan"}
+							</button>
+						</span>
+					</div>
+					<div class="min-h-0 flex-1 overflow-y-auto">
 					<SessionTree
 						sessions={sessions}
 						selectedSessionId={selected?.id ?? null}
@@ -714,6 +648,15 @@ export function App() {
 						onRename={requestRename}
 					/>
 					<StartingSpawnList spawns={startingSpawns} onCancel={handleStopSpawn} />
+					</div>
+					{leech && leech.sessions > 0 && (
+						<p
+							class="shrink-0 border-t border-base-300 px-2 py-1 font-mono text-caption opacity-50"
+							title={`${leech.dirs.length > 0 ? leech.dirs.join("\n") : "No leech directories configured"}${leech.skippedStale ? `\n${leech.skippedStale} stale transcript(s) skipped` : ""}`}
+						>
+							{leech.sessions} leeched from disk
+						</p>
+					)}
 				</aside>
 				<main class="flex min-h-0 min-w-0 flex-1 flex-col">
 					{(error || actionError) && (
@@ -787,14 +730,6 @@ export function App() {
 										onOpenImage={setLightbox}
 									/>
 								</div>
-								{sessions.some((node) => node.parentSessionId === selected.id) && (
-									<SubagentRail
-										session={selected}
-										sessions={sessions}
-										events={events}
-										onSelect={selectSession}
-									/>
-								)}
 							</div>
 						</>
 					) : (

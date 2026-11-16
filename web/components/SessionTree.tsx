@@ -212,9 +212,6 @@ function TreeRow({
 						{spawnActive && (
 							<span class="size-1 rounded-full bg-info" title="Started from the dashboard" aria-hidden="true" />
 						)}
-						<time class="w-14 shrink-0 whitespace-nowrap text-right font-mono text-caption tabular-nums opacity-45 group-hover:opacity-70">
-							{relativeTime(session.updatedAt || session.startedAt)}
-						</time>
 					</span>
 				</button>
 				<button
