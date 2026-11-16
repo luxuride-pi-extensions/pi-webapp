@@ -165,14 +165,13 @@ function SessionHeader({
 					{canTakeOver && (
 						<button
 							type="button"
-							class="btn btn-ghost btn-sm btn-square w-9 text-body-content/70"
+							class="btn btn-primary btn-xs gap-1"
 							disabled={busy}
 							onClick={() => onTakeOver?.(session)}
-							aria-label="Take over this session"
 							title="Resume this session in a new pi process and prompt it from here"
 							data-testid="takeover-button"
 						>
-							{busy ? <span class="loading loading-spinner loading-xs" /> : <span aria-hidden="true">↻</span>}
+							{busy ? <span class="loading loading-spinner loading-xs" /> : "take over"}
 						</button>
 					)}
 					{(onRename || onRemove) && (
